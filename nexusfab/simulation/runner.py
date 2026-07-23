@@ -58,7 +58,17 @@ class SimulationResult:
         }
 
 
-def _line_config_from_seed(line_seed) -> LineConfig:
+# Per-category tuning to hit requirements starting OEE targets
+_CATEGORY_TUNING = {
+    "WATER":          {"speed_factor": 0.82, "micro_stop_probability": 0.04, "quality_rate": 0.97},
+    "CONFECTIONERY":  {"speed_factor": 0.75, "micro_stop_probability": 0.06, "quality_rate": 0.96},
+    "DAIRY":          {"speed_factor": 0.70, "micro_stop_probability": 0.07, "quality_rate": 0.95},
+    "PET_FOOD":       {"speed_factor": 0.80, "micro_stop_probability": 0.04, "quality_rate": 0.97},
+    "PREPARED_FOODS": {"speed_factor": 0.72, "micro_stop_probability": 0.06, "quality_rate": 0.96},
+}
+
+
+def _line_config_from_seed(line_seed, plant_category: str = "WATER") -> LineConfig:
     equipment = [
         EquipmentConfig(
             name=eq.name,
@@ -68,11 +78,15 @@ def _line_config_from_seed(line_seed) -> LineConfig:
         )
         for eq in line_seed.equipment
     ]
+    tuning = _CATEGORY_TUNING.get(plant_category, _CATEGORY_TUNING["WATER"])
     return LineConfig(
         name=line_seed.name,
         line_type=line_seed.line_type,
         speed_units_per_min=line_seed.speed_units_per_min,
         equipment=equipment,
+        speed_factor=tuning["speed_factor"],
+        micro_stop_probability=tuning["micro_stop_probability"],
+        quality_rate=tuning["quality_rate"],
     )
 
 
@@ -126,7 +140,7 @@ def run_plant(
     result = SimulationResult(duration_hours=duration_hours, seed=seed)
 
     for i, line_seed in enumerate(lines):
-        cfg = _line_config_from_seed(line_seed)
+        cfg = _line_config_from_seed(line_seed, plant.category)
         lr = run_single_line(cfg, duration_hours, seed + i)
         result.line_results.append(lr)
         result.total_events += len(lr.events)

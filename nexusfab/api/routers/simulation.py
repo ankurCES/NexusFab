@@ -32,7 +32,7 @@ async def run_simulation(req: SimulateRequest):
         line_seed = next((l for l in plant.lines if l.name == req.line_name), None)
         if not line_seed:
             raise HTTPException(404, f"Line {req.line_name} not found in {req.plant_id}")
-        cfg = _line_config_from_seed(line_seed)
+        cfg = _line_config_from_seed(line_seed, plant.category)
         lr = run_single_line(cfg, req.duration_hours, req.seed)
         return {
             "type": "single_line",

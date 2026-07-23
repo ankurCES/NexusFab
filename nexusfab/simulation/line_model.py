@@ -40,6 +40,9 @@ class LineConfig:
     speed_units_per_min: float
     equipment: list[EquipmentConfig] = field(default_factory=list)
     quality_rate: float = 0.97  # fraction good units
+    speed_factor: float = 0.88  # actual vs rated speed (performance loss)
+    micro_stop_probability: float = 0.03  # chance of 1-5 min micro-stop per minute
+    micro_stop_max_min: float = 5.0
 
 @dataclass
 class LineMetrics:
@@ -139,13 +142,23 @@ class ProductionLine:
                 yield from self._handle_failure(failed_eq)
                 continue
 
-            # Produce for 1 minute
+            # Micro-stop check
+            if self.rng.random() < self.config.micro_stop_probability:
+                stop_dur = self.rng.uniform(1.0, self.config.micro_stop_max_min)
+                self.state = LineState.IDLE
+                yield self.env.timeout(stop_dur)
+                self.metrics.downtime_other += stop_dur
+                self.metrics.total_time += stop_dur
+                self.state = LineState.RUNNING
+                continue
+
+            # Produce for 1 minute at reduced speed
             self.state = LineState.RUNNING
             yield self.env.timeout(1.0)
             self.metrics.running_time += 1.0
             self.metrics.total_time += 1.0
 
-            units = int(self.config.speed_units_per_min)
+            units = int(self.config.speed_units_per_min * self.config.speed_factor)
             good = int(units * self.config.quality_rate)
             rejected = units - good
             self.metrics.units_produced += good
