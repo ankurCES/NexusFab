@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from nexusfab.seed.plants import PLANTS
+from nexusfab.seed.plants import PLANTS, seed_uuid
 from nexusfab.seed.products import get_products_for_plant
 
 
@@ -43,6 +43,7 @@ class OEEShiftRecord:
     performance: float
     quality: float
     oee: float
+    six_big_losses: dict | None = None
 
 
 @dataclass
@@ -61,14 +62,39 @@ _DOWNTIME_CAUSES = [
     ("cip",        0.10, 45, 180, ["Scheduled CIP", "Allergen CIP", "Extended CIP"]),
 ]
 
-# OEE tuning by plant category
+# OEE tuning — targets 55-75% typical, some 80%+
 _OEE_PARAMS = {
-    "WATER":          {"avail": (0.78, 0.92), "perf": (0.75, 0.90), "qual": (0.96, 0.99)},
-    "CONFECTIONERY":  {"avail": (0.70, 0.85), "perf": (0.70, 0.85), "qual": (0.94, 0.98)},
-    "DAIRY":          {"avail": (0.65, 0.80), "perf": (0.65, 0.82), "qual": (0.93, 0.97)},
-    "PET_FOOD":       {"avail": (0.75, 0.90), "perf": (0.72, 0.88), "qual": (0.95, 0.99)},
-    "PREPARED_FOODS": {"avail": (0.68, 0.83), "perf": (0.68, 0.85), "qual": (0.94, 0.98)},
+    "WATER":          {"avail": (0.80, 0.95), "perf": (0.78, 0.93), "qual": (0.97, 0.995)},
+    "CONFECTIONERY":  {"avail": (0.75, 0.90), "perf": (0.75, 0.90), "qual": (0.96, 0.99)},
+    "DAIRY":          {"avail": (0.74, 0.88), "perf": (0.75, 0.89), "qual": (0.95, 0.99)},
+    "PET_FOOD":       {"avail": (0.78, 0.93), "perf": (0.76, 0.91), "qual": (0.96, 0.995)},
+    "PREPARED_FOODS": {"avail": (0.74, 0.88), "perf": (0.75, 0.89), "qual": (0.95, 0.99)},
 }
+
+
+def _weibull_duration(rng: random.Random, min_d: float, max_d: float) -> float:
+    # ponytail: Weibull shape=1.5 (increasing failure rate), scale tuned to midpoint
+    mean = (min_d + max_d) / 2
+    raw = rng.weibullvariate(mean / 0.9027, 1.5)
+    return max(min_d, min(max_d, raw))
+
+
+def _six_big_losses(rng: random.Random, avail: float, perf: float, qual: float) -> dict:
+    """Distribute OEE losses across six big loss categories (minutes per shift)."""
+    avail_loss = (1 - avail) * 480
+    perf_loss = (1 - perf) * avail * 480
+    qual_loss = (1 - qual) * avail * perf * 480
+    a_split = rng.uniform(0.3, 0.7)
+    p_split = rng.uniform(0.3, 0.7)
+    q_split = rng.uniform(0.3, 0.7)
+    return {
+        "equipment_failure": round(avail_loss * a_split, 1),
+        "setup_adjustments": round(avail_loss * (1 - a_split), 1),
+        "small_stops": round(perf_loss * p_split, 1),
+        "reduced_speed": round(perf_loss * (1 - p_split), 1),
+        "process_defects": round(qual_loss * q_split, 1),
+        "reduced_yield": round(qual_loss * (1 - q_split), 1),
+    }
 
 
 def generate_history(days: int = 30, seed: int = 42) -> HistoryData:
@@ -127,7 +153,7 @@ def generate_history(days: int = 30, seed: int = 42) -> HistoryData:
                         cause_type, _, min_dur, max_dur, causes = rng.choices(
                             _DOWNTIME_CAUSES, weights=[c[1] for c in _DOWNTIME_CAUSES]
                         )[0]
-                        duration = rng.uniform(min_dur, max_dur)
+                        duration = _weibull_duration(rng, min_dur, max_dur)
                         dt_start = shift_start + timedelta(minutes=rng.uniform(0, shift_minutes - duration))
                         equipment_name = rng.choice(line.equipment).name if line.equipment else None
 

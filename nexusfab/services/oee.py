@@ -1,6 +1,13 @@
 """OEE calculator with Six Big Losses categorization."""
 
+from __future__ import annotations
+
+import uuid
 from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 @dataclass
 class OEEResult:
@@ -57,9 +64,12 @@ def _rate(value: float, thresholds: list[tuple[float, str]]) -> str:
     return thresholds[-1][1]
 
 
-_AVAILABILITY_RATINGS = [(0.88, "world-class"), (0.83, "good"), (0.75, "average"), (0.0, "poor")]
-_PERFORMANCE_RATINGS = [(0.92, "world-class"), (0.85, "good"), (0.75, "average"), (0.0, "poor")]
-_QUALITY_RATINGS = [(0.99, "world-class"), (0.97, "good"), (0.95, "average"), (0.0, "poor")]
+_AVAILABILITY_RATINGS = [(0.90, "world-class"), (0.83, "good"), (0.75, "average"), (0.0, "poor")]
+_PERFORMANCE_RATINGS = [(0.95, "world-class"), (0.85, "good"), (0.75, "average"), (0.0, "poor")]
+_QUALITY_RATINGS = [(0.999, "world-class"), (0.97, "good"), (0.95, "average"), (0.0, "poor")]
+
+_BREAKDOWN_TYPES = {"mechanical", "electrical", "process", "other"}
+_SETUP_TYPES = {"changeover", "cip", "planned_maintenance"}
 _OEE_RATINGS = [(0.85, "world-class"), (0.75, "good"), (0.60, "average"), (0.0, "poor")]
 
 
@@ -121,3 +131,106 @@ def oee_from_simulation(metrics, line_config) -> OEEResult:
         total_units=total_units,
         good_units=metrics.units_produced,
     )
+
+
+async def async_calculate_oee(
+    session: AsyncSession,
+    line_id: uuid.UUID,
+    start: datetime,
+    end: datetime,
+    *,
+    shift_number: int = 1,
+) -> OEEResult:
+    """Query DB for production/downtime data, calculate OEE, and persist the record."""
+    from nexusfab.models.downtime import DowntimeEvent
+    from nexusfab.models.oee import OEERecord
+    from nexusfab.models.plant import ProductionLine
+    from nexusfab.models.production import ProductionRun
+
+    line = (await session.execute(
+        select(ProductionLine).where(ProductionLine.id == line_id)
+    )).scalar_one()
+    ideal_cycle = 1.0 / line.speed_units_per_min if line.speed_units_per_min > 0 else 1.0
+
+    planned_time = (end - start).total_seconds() / 60.0
+
+    runs = (await session.execute(
+        select(
+            func.coalesce(func.sum(ProductionRun.actual_qty), 0),
+            func.coalesce(func.sum(ProductionRun.good_qty), 0),
+        ).where(
+            ProductionRun.line_id == line_id,
+            ProductionRun.start_time >= start,
+            ProductionRun.start_time < end,
+        )
+    )).one()
+    total_units, good_units = int(runs[0]), int(runs[1])
+
+    dt_rows = (await session.execute(
+        select(DowntimeEvent).where(
+            DowntimeEvent.line_id == line_id,
+            DowntimeEvent.start_time >= start,
+            DowntimeEvent.start_time < end,
+        )
+    )).scalars().all()
+
+    breakdown_min = 0.0
+    setup_min = 0.0
+    for evt in dt_rows:
+        if evt.end_time is None:
+            continue
+        mins = (evt.end_time - evt.start_time).total_seconds() / 60.0
+        if evt.downtime_type.value in _BREAKDOWN_TYPES:
+            breakdown_min += mins
+        else:
+            setup_min += mins
+
+    result = calculate_oee(
+        planned_time_min=planned_time,
+        downtime_breakdown_min=breakdown_min,
+        downtime_setup_min=setup_min,
+        ideal_cycle_time_min=ideal_cycle,
+        total_units=total_units,
+        good_units=good_units,
+    )
+
+    record = OEERecord(
+        line_id=line_id,
+        shift_date=start.date(),
+        shift_number=shift_number,
+        availability=result.availability,
+        performance=result.performance,
+        quality=result.quality,
+        oee=result.oee,
+        six_big_losses=result.to_dict()["six_big_losses"],
+    )
+    session.add(record)
+    await session.commit()
+
+    return result
+
+
+if __name__ == "__main__":
+    r = calculate_oee(
+        planned_time_min=480,
+        downtime_breakdown_min=30,
+        downtime_setup_min=20,
+        ideal_cycle_time_min=0.5,
+        total_units=800,
+        good_units=790,
+        small_stops_min=10,
+    )
+    d = r.to_dict()
+    assert 0 < r.availability < 1, f"availability out of range: {r.availability}"
+    assert 0 < r.performance <= 1, f"performance out of range: {r.performance}"
+    assert 0 < r.quality <= 1, f"quality out of range: {r.quality}"
+    assert abs(r.oee - r.availability * r.performance * r.quality) < 1e-9
+    assert r.breakdown_loss == 30
+    assert r.setup_loss == 20
+    assert "availability_losses" in d["six_big_losses"]
+    assert "performance_losses" in d["six_big_losses"]
+    assert "quality_losses" in d["six_big_losses"]
+    assert all(v in ("world-class", "good", "average", "poor") for v in d["ratings"].values())
+    print(f"OEE={r.oee:.2%}  A={r.availability:.2%} P={r.performance:.2%} Q={r.quality:.2%}")
+    print(f"Ratings: {d['ratings']}")
+    print("All checks passed.")

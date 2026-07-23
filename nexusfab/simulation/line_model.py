@@ -24,6 +24,26 @@ class SimEvent:
     detail: str = ""
     duration: float = 0.0
 
+_ELECTRICAL_TYPES = {"CONVEYOR"}  # ponytail: expand set if seed adds electrical equipment
+
+# ponytail: simple mapping, product-category pairs → CIP minutes
+_CIP_DURATION: dict[tuple[str, str], float] = {
+    ("DAIRY", "DAIRY"): 60.0,
+    ("DAIRY", "CONFECTIONERY"): 90.0,
+    ("CONFECTIONERY", "DAIRY"): 90.0,
+    ("CONFECTIONERY", "CONFECTIONERY"): 45.0,
+}
+_CIP_DEFAULT = 45.0  # min for same-category, 75 for cross-category
+
+
+def cip_duration_minutes(from_cat: str, to_cat: str) -> float:
+    """30-90 min CIP based on product category transition."""
+    key = (from_cat.upper(), to_cat.upper())
+    if key in _CIP_DURATION:
+        return _CIP_DURATION[key]
+    return 75.0 if from_cat != to_cat else _CIP_DEFAULT
+
+
 @dataclass
 class EquipmentConfig:
     name: str
@@ -33,16 +53,21 @@ class EquipmentConfig:
     weibull_shape: float = 2.0  # shape param, 1.5-2.5 typical
     repair_sigma: float = 0.4
 
+    @property
+    def failure_category(self) -> str:
+        return "electrical" if self.equipment_type.upper() in _ELECTRICAL_TYPES else "mechanical"
+
 @dataclass
 class LineConfig:
     name: str
     line_type: str
     speed_units_per_min: float
     equipment: list[EquipmentConfig] = field(default_factory=list)
-    quality_rate: float = 0.97  # fraction good units
-    speed_factor: float = 0.88  # actual vs rated speed (performance loss)
-    micro_stop_probability: float = 0.03  # chance of 1-5 min micro-stop per minute
+    quality_rate: float = 0.97
+    speed_factor: float = 0.88
+    micro_stop_probability: float = 0.03
     micro_stop_max_min: float = 5.0
+    changeover_matrix: dict[tuple[str, str], float] = field(default_factory=dict)
 
 @dataclass
 class LineMetrics:
@@ -177,17 +202,26 @@ class ProductionLine:
         self._log("FAILURE", eq.config.name, f"{eq.config.equipment_type} failure")
 
         self.state = LineState.REPAIR
-        # Wait for repair to complete
         if eq.failure_event:
             yield eq.failure_event
         repair_time = self.env.now - start
-        self.metrics.downtime_mechanical += repair_time
+
+        if eq.config.failure_category == "electrical":
+            self.metrics.downtime_electrical += repair_time
+        else:
+            self.metrics.downtime_mechanical += repair_time
+
         self.metrics.total_time += repair_time
         self.metrics.repairs += 1
         self._log("REPAIR_COMPLETE", eq.config.name, duration=repair_time)
         self.state = LineState.RUNNING
 
-    def do_changeover(self, duration_minutes: float):
+    def do_changeover(self, duration_minutes: float | None = None,
+                      from_product: str | None = None,
+                      to_product: str | None = None):
+        if duration_minutes is None:
+            duration_minutes = self.config.changeover_matrix.get(
+                (from_product or "", to_product or ""), 30.0)
         return self.env.process(self._changeover(duration_minutes))
 
     def _changeover(self, duration_minutes: float):
@@ -199,7 +233,12 @@ class ProductionLine:
         self._log("CHANGEOVER_END", duration=duration_minutes)
         self.state = LineState.RUNNING
 
-    def do_cip(self, duration_minutes: float = 60.0):
+    def do_cip(self, duration_minutes: float | None = None,
+               from_category: str | None = None,
+               to_category: str | None = None):
+        if duration_minutes is None:
+            duration_minutes = cip_duration_minutes(
+                from_category or "", to_category or "")
         return self.env.process(self._cip(duration_minutes))
 
     def _cip(self, duration_minutes: float):
@@ -210,3 +249,37 @@ class ProductionLine:
         self.metrics.total_time += duration_minutes
         self._log("CIP_END", duration=duration_minutes)
         self.state = LineState.RUNNING
+
+
+if __name__ == "__main__":
+    import random as _rand
+    env = simpy.Environment()
+    rng = _rand.Random(42)
+    cfg = LineConfig(
+        name="SELFCHECK-L1", line_type="FILLING", speed_units_per_min=120,
+        equipment=[
+            EquipmentConfig("FIL-01", "FILLER", mtbf_hours=80, mttr_hours=1.5, weibull_shape=1.8),
+            EquipmentConfig("CAP-01", "CAPPER", mtbf_hours=120, mttr_hours=1.0),
+            EquipmentConfig("CONV-01", "CONVEYOR", mtbf_hours=200, mttr_hours=0.5),
+        ],
+        changeover_matrix={("SKU-A", "SKU-B"): 25.0, ("SKU-B", "SKU-A"): 20.0},
+    )
+    line = ProductionLine(env, cfg, rng)
+    line.start()
+    env.run(until=24 * 60)  # 24 hours in minutes
+
+    m = line.metrics
+    print(f"=== 24h self-check: {cfg.name} ===")
+    print(f"running:  {m.running_time:.0f} min")
+    print(f"downtime: mech={m.downtime_mechanical:.0f} elec={m.downtime_electrical:.0f} "
+          f"chg={m.downtime_changeover:.0f} cip={m.downtime_cip:.0f} other={m.downtime_other:.0f}")
+    print(f"units:    {m.units_produced} good, {m.units_rejected} rejected")
+    print(f"failures: {m.failures}  repairs: {m.repairs}")
+    print(f"avail:    {m.availability:.1%}")
+    print(f"events:   {len(line.events)}")
+    assert m.running_time > 0, "line never ran"
+    assert m.failures > 0, "no failures in 24h — Weibull params too generous?"
+    assert m.units_produced > 0, "zero units produced"
+    assert m.availability < 1.0, "100% availability — failures didn't register"
+    assert len(line.events) >= 2, "too few events logged"
+    print("PASS")
