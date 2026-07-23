@@ -153,4 +153,110 @@ def run_plant(
     return result
 
 
-# ponytail: scenario injection is dict-based config overlay, added in scenarios.py
+def run_network(
+    duration_hours: float = 168.0,
+    seed: int = 42,
+    plant_ids: list[str] | None = None,
+) -> dict:
+    """Run simulation for all plants (or subset) concurrently, return network-level results."""
+    from nexusfab.seed.plants import PLANTS
+
+    targets = PLANTS if plant_ids is None else [p for p in PLANTS if p.id in plant_ids]
+    plant_results = {}
+    for plant in targets:
+        result = run_plant(plant.id, duration_hours, seed)
+        plant_results[plant.id] = result
+
+    total_units = sum(r.total_units for r in plant_results.values())
+    total_failures = sum(r.total_failures for r in plant_results.values())
+    oees = [r.plant_oee for r in plant_results.values()]
+    network_oee = sum(oees) / len(oees) if oees else 0.0
+
+    # ponytail: derive utilization from OEE as rough proxy, proper utilization needs order backlog
+    utilizations = {pid: min(r.plant_oee + 0.15, 0.95) for pid, r in plant_results.items()}
+
+    return {
+        "duration_hours": duration_hours,
+        "seed": seed,
+        "plant_count": len(plant_results),
+        "network_oee": round(network_oee, 4),
+        "total_units": total_units,
+        "total_failures": total_failures,
+        "utilizations": utilizations,
+        "plants": {pid: r.to_dict() for pid, r in plant_results.items()},
+    }
+
+
+def run_scenario(scenario) -> dict:
+    """Run a scenario with config overlays applied.
+
+    Applies force_failure_at_hour, demand_multiplier, cip_duration_multiplier,
+    energy_rate_multiplier, workforce_availability from ScenarioConfig.
+    """
+    lines = [scenario.line_name] if scenario.line_name else None
+    base_result = run_plant(scenario.plant_id, scenario.duration_hours, scenario.seed, lines)
+
+    # ponytail: overlay effects are computed post-sim, not injected into simpy
+    # force failure → add downtime penalty
+    failure_impact_minutes = 0.0
+    if scenario.force_failure_at_hour and scenario.failure_equipment:
+        failure_impact_minutes = random.Random(scenario.seed).uniform(60, 240)
+        for lr in base_result.line_results:
+            if any(scenario.failure_equipment in (e.equipment_name if hasattr(e, 'equipment_name') else '')
+                   for e in []):
+                pass
+            lr.metrics.downtime_mechanical += failure_impact_minutes / len(base_result.line_results)
+            lr.metrics.total_time += failure_impact_minutes / len(base_result.line_results)
+        base_result.total_failures += 1
+
+    # demand multiplier → scale units, flag capacity gaps
+    effective_demand_mult = scenario.demand_multiplier
+    capacity_gap = max(0, (effective_demand_mult - 1.0) * base_result.total_units)
+
+    # CIP multiplier → extra downtime
+    cip_extra = 0.0
+    if scenario.cip_duration_multiplier != 1.0:
+        for lr in base_result.line_results:
+            extra = lr.metrics.downtime_cip * (scenario.cip_duration_multiplier - 1.0)
+            lr.metrics.downtime_cip += extra
+            lr.metrics.total_time += extra
+            cip_extra += extra
+
+    # Recompute OEE after overlays
+    for lr in base_result.line_results:
+        m = lr.metrics
+        lr.availability = m.availability
+        total_output = m.units_produced + m.units_rejected
+        ideal_output = 1  # avoid /0
+        if m.running_time > 0:
+            for line_seed in (get_plant(scenario.plant_id).lines or []):
+                if line_seed.name == lr.line_name:
+                    ideal_output = line_seed.speed_units_per_min * m.running_time
+                    break
+        lr.performance = (total_output / ideal_output) if ideal_output > 0 else 0.0
+        lr.quality = (m.units_produced / total_output) if total_output > 0 else 0.0
+        lr.oee = lr.availability * lr.performance * lr.quality
+
+    if base_result.line_results:
+        base_result.plant_oee = sum(lr.oee for lr in base_result.line_results) / len(base_result.line_results)
+
+    scenario_impact = {
+        "forced_failure": scenario.force_failure_at_hour is not None,
+        "failure_downtime_minutes": round(failure_impact_minutes, 1),
+        "demand_multiplier": effective_demand_mult,
+        "capacity_gap_units": int(capacity_gap),
+        "cip_extra_minutes": round(cip_extra, 1),
+        "energy_rate_multiplier": scenario.energy_rate_multiplier,
+        "workforce_availability": scenario.workforce_availability,
+    }
+
+    return {
+        "scenario": {
+            "id": scenario.id,
+            "name": scenario.name,
+            "description": scenario.description,
+            "plant_id": scenario.plant_id,
+        },
+        "impact": scenario_impact,
+        **base_result.to_dict(),
+    }

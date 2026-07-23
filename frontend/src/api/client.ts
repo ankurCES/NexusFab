@@ -1,13 +1,18 @@
 import type {
   DashboardResponse,
   DemandPlan,
+  EnergyOptimization,
   EnergyReport,
+  FlowGraph,
   InventoryReport,
+  KpiTrending,
   MaintenanceSchedule,
   NetworkReport,
   Plant,
   PlantLine,
   PlantOEE,
+  ScenarioResult,
+  ScenarioSummary,
   ScheduleResponse,
   WorkforceReport,
 } from '../types/api';
@@ -41,9 +46,21 @@ export const api = {
   inventory: (plantId?: string) =>
     plantId ? get<InventoryReport>(`/maintenance/inventory/${plantId}`) : get<InventoryReport>('/maintenance/inventory'),
   network: () => get<NetworkReport>('/network/status'),
+  networkFlow: () => get<FlowGraph>('/network/flow'),
+  networkBalance: (utilizations: Record<string, number>, failedPlant?: string) =>
+    post<NetworkReport>('/network/balance', { utilizations, failed_plant: failedPlant }),
   demand: (plantId: string, weeks = 12) => get<DemandPlan>(`/network/demand/${plantId}?weeks=${weeks}`),
   workforce: (plantId?: string) =>
     plantId ? get<WorkforceReport>(`/workforce/${plantId}`) : get<WorkforceReport>('/workforce'),
   energy: (plantId?: string, days = 30) =>
     plantId ? get<EnergyReport>(`/energy/${plantId}?days=${days}`) : get<EnergyReport>(`/energy?days=${days}`),
+  energyOptimize: (plantId?: string, days = 30) =>
+    post<EnergyOptimization>('/energy/optimize', { plant_id: plantId ?? null, period_days: days }),
+  scenarios: () => get<ScenarioSummary[]>('/scenarios'),
+  runScenario: (scenarioId: string) =>
+    post<ScenarioResult>('/scenarios/run', { scenario_id: scenarioId }),
+  runCustomScenario: (params: Record<string, unknown>) =>
+    post<ScenarioResult>('/scenarios/custom', params),
+  kpiTrending: (plantId?: string, periods = 6) =>
+    post<KpiTrending>('/analytics/kpi', { plant_id: plantId ?? null, periods }),
 };

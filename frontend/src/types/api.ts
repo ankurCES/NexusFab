@@ -152,9 +152,37 @@ export interface TransferOption {
   to: string;
   category: string;
   tons: number;
+  pallets: number;
   transport_cost: number;
   transport_hours: number;
   cost_per_ton: number;
+  cost_per_pallet: number;
+}
+
+export interface FlowNode {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  category: string;
+  capacity_tons: number;
+  utilization: number;
+  status: 'normal' | 'overloaded' | 'underloaded';
+}
+
+export interface FlowEdge {
+  source: string;
+  target: string;
+  flow_tons: number;
+  cost: number;
+  lead_time_hours: number;
+  pallets: number;
+  active: boolean;
+}
+
+export interface FlowGraph {
+  nodes: FlowNode[];
+  edges: FlowEdge[];
 }
 
 export interface NetworkReport {
@@ -166,6 +194,7 @@ export interface NetworkReport {
   plant_count: number;
   plants: PlantCapacity[];
   suggested_transfers: TransferOption[];
+  flow_graph: FlowGraph;
 }
 
 // Demand
@@ -241,6 +270,83 @@ export interface WorkforceReport {
   training_gaps_count: number;
   training_gaps: TrainingGap[];
   operators: OperatorProfile[];
+}
+
+// Scenarios
+export interface ScenarioSummary {
+  id: string;
+  name: string;
+  description: string;
+  plant_id: string;
+}
+
+export interface ScenarioImpact {
+  forced_failure: boolean;
+  failure_downtime_minutes: number;
+  demand_multiplier: number;
+  capacity_gap_units: number;
+  cip_extra_minutes: number;
+  energy_rate_multiplier: number;
+  workforce_availability: number;
+}
+
+export interface ScenarioResult {
+  scenario: { id: string; name: string; description: string; plant_id: string };
+  impact: ScenarioImpact;
+  duration_hours: number;
+  seed: number;
+  plant_oee: number;
+  total_units: number;
+  total_failures: number;
+  lines: { name: string; oee: number; availability: number; performance: number; quality: number }[];
+}
+
+// Energy Optimization
+export interface EnergyScheduleSlot {
+  equipment_type: string;
+  plant_id: string;
+  line: string;
+  original_period: string;
+  optimized_period: string;
+  hours: number;
+  kwh: number;
+  baseline_cost: number;
+  optimized_cost: number;
+  savings: number;
+}
+
+export interface EnergyOptimization {
+  plant_id: string;
+  period_days: number;
+  baseline_cost: number;
+  optimized_cost: number;
+  total_savings: number;
+  savings_pct: number;
+  total_kwh: number;
+  kwh_by_line: Record<string, number>;
+  tariff_schedule: { start: number; end: number; period: string; rate_multiplier: number }[];
+  slots: EnergyScheduleSlot[];
+}
+
+// Analytics KPI
+export interface KpiPeriod {
+  period: number;
+  oee: number;
+  otif: number;
+  waste_pct: number;
+  total_units: number;
+  failures: number;
+  energy_kwh: number;
+  energy_cost: number;
+  energy_co2_kg: number;
+  kwh_per_ton: number;
+}
+
+export interface KpiTrending {
+  plant_id: string;
+  periods: number;
+  period_hours: number;
+  trending: KpiPeriod[];
 }
 
 // Energy

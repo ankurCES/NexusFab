@@ -5,6 +5,9 @@ const links = [
   { to: '/maintenance', label: 'Maintenance', icon: '🔧' },
   { to: '/network', label: 'Network', icon: '🌐' },
   { to: '/workforce', label: 'Workforce', icon: '👷' },
+  { to: '/energy', label: 'Energy', icon: '⚡' },
+  { to: '/scenarios', label: 'Scenarios', icon: '🔬' },
+  { to: '/analytics', label: 'Analytics', icon: '📈' },
 ];
 
 export default function Layout() {

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { api } from '../api/client';
-import type { NetworkReport, DemandPlan } from '../types/api';
+import type { NetworkReport, DemandPlan, FlowNode, FlowEdge } from '../types/api';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, CartesianGrid } from 'recharts';
 
 const PLANTS = ['PLT-001', 'PLT-002', 'PLT-003', 'PLT-004', 'PLT-005'];
@@ -53,6 +53,14 @@ export default function Network() {
         <KPI label="Bottleneck" value={net.bottleneck} warn />
         <KPI label="Plants" value={net.plant_count} />
       </div>
+
+      {/* Network Flow Graph */}
+      {net.flow_graph && (
+        <div className="bg-slate-800 rounded-lg p-4 mb-6">
+          <h3 className="text-sm font-semibold text-white mb-3">Plant Network Flow</h3>
+          <NetworkFlowGraph nodes={net.flow_graph.nodes} edges={net.flow_graph.edges} />
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-6 mb-6">
         {/* Utilization chart */}
@@ -108,8 +116,10 @@ export default function Network() {
             {net.suggested_transfers.map((t, i) => (
               <div key={i} className="bg-slate-900 rounded p-3">
                 <div className="text-white font-medium text-sm">{t.from} → {t.to}</div>
-                <div className="text-xs text-slate-400 mt-1">{t.tons} tons · {t.category}</div>
-                <div className="text-xs text-slate-500">${t.transport_cost.toLocaleString()} transport · {t.transport_hours}h</div>
+                <div className="text-xs text-slate-400 mt-1">{t.tons} tons · {t.pallets} pallets · {t.category}</div>
+                <div className="text-xs text-slate-500">
+                  ${t.transport_cost.toLocaleString()} total · ${t.cost_per_pallet}/pallet · {t.transport_hours}h
+                </div>
               </div>
             ))}
           </div>
@@ -160,5 +170,107 @@ function KPI({ label, value, warn }: { label: string; value: string | number; wa
       <div className="text-xs text-slate-400">{label}</div>
       <div className={`text-lg font-bold mt-1 ${warn ? 'text-red-400' : 'text-white'}`}>{value}</div>
     </div>
+  );
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  normal: '#3b82f6',
+  overloaded: '#ef4444',
+  underloaded: '#22c55e',
+};
+
+function NetworkFlowGraph({ nodes, edges }: { nodes: FlowNode[]; edges: FlowEdge[] }) {
+  // ponytail: SVG-based network graph, no extra dependency
+  const W = 700, H = 320, R = 28;
+
+  const positions = useMemo(() => {
+    if (!nodes.length) return {};
+    const lats = nodes.map((n) => n.lat);
+    const lons = nodes.map((n) => n.lon);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+    const padX = 60, padY = 50;
+    const pos: Record<string, { x: number; y: number }> = {};
+    for (const n of nodes) {
+      const nx = maxLon === minLon ? 0.5 : (n.lon - minLon) / (maxLon - minLon);
+      const ny = maxLat === minLat ? 0.5 : (n.lat - minLat) / (maxLat - minLat);
+      pos[n.id] = {
+        x: padX + nx * (W - 2 * padX),
+        y: padY + (1 - ny) * (H - 2 * padY),
+      };
+    }
+    return pos;
+  }, [nodes]);
+
+  const activeEdges = edges.filter((e) => e.active);
+  const inactiveEdges = edges.filter((e) => !e.active);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 340 }}>
+      {/* Inactive edges (dashed) */}
+      {inactiveEdges.map((e, i) => {
+        const s = positions[e.source], t = positions[e.target];
+        if (!s || !t) return null;
+        return (
+          <line key={`i-${i}`} x1={s.x} y1={s.y} x2={t.x} y2={t.y}
+            stroke="#334155" strokeWidth={1} strokeDasharray="4 4" opacity={0.4} />
+        );
+      })}
+      {/* Active edges */}
+      {activeEdges.map((e, i) => {
+        const s = positions[e.source], t = positions[e.target];
+        if (!s || !t) return null;
+        const mx = (s.x + t.x) / 2, my = (s.y + t.y) / 2;
+        const angle = Math.atan2(t.y - s.y, t.x - s.x);
+        const ax = t.x - Math.cos(angle) * R, ay = t.y - Math.sin(angle) * R;
+        return (
+          <g key={`a-${i}`}>
+            <line x1={s.x} y1={s.y} x2={ax} y2={ay}
+              stroke="#f59e0b" strokeWidth={Math.max(2, Math.min(6, e.flow_tons / 20))} markerEnd="url(#arrow)" />
+            <text x={mx} y={my - 6} textAnchor="middle" fill="#f59e0b" fontSize={9} fontWeight="bold">
+              {Math.round(e.flow_tons)}t
+            </text>
+            <text x={mx} y={my + 6} textAnchor="middle" fill="#94a3b8" fontSize={8}>
+              {e.pallets}p · {e.lead_time_hours}h
+            </text>
+          </g>
+        );
+      })}
+      {/* Nodes */}
+      {nodes.map((n) => {
+        const p = positions[n.id];
+        if (!p) return null;
+        const fill = STATUS_COLORS[n.status] || '#3b82f6';
+        return (
+          <g key={n.id}>
+            <circle cx={p.x} cy={p.y} r={R} fill={fill} opacity={0.85} stroke="#1e293b" strokeWidth={2} />
+            <text x={p.x} y={p.y - 4} textAnchor="middle" fill="white" fontSize={9} fontWeight="bold">
+              {n.id.replace('PLT-00', 'P')}
+            </text>
+            <text x={p.x} y={p.y + 8} textAnchor="middle" fill="white" fontSize={7}>
+              {Math.round(n.utilization * 100)}%
+            </text>
+            <text x={p.x} y={p.y + R + 12} textAnchor="middle" fill="#94a3b8" fontSize={8}>
+              {n.name.replace('Nex', '')}
+            </text>
+          </g>
+        );
+      })}
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5"
+          markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
+        </marker>
+      </defs>
+      {/* Legend */}
+      <g transform={`translate(${W - 140}, 10)`}>
+        {Object.entries(STATUS_COLORS).map(([status, color], i) => (
+          <g key={status} transform={`translate(0, ${i * 16})`}>
+            <circle cx={6} cy={6} r={5} fill={color} opacity={0.85} />
+            <text x={16} y={10} fill="#94a3b8" fontSize={9}>{status}</text>
+          </g>
+        ))}
+      </g>
+    </svg>
   );
 }

@@ -203,6 +203,156 @@ def analyze_energy(
     return report
 
 
+# ── Off-peak energy optimization ──
+
+_ENERGY_INTENSIVE_TYPES = {"PASTEURIZER", "HOMOGENIZER", "DRYER"}
+
+# ponytail: flat tariff model — 3 periods, multiplier vs base rate
+_TARIFF_PERIODS = [
+    # (start_hour, end_hour, label, multiplier)
+    (0,  6,  "off-peak", 0.5),
+    (6,  9,  "shoulder", 0.8),
+    (9,  17, "peak",     1.0),
+    (17, 22, "shoulder", 0.8),
+    (22, 24, "off-peak", 0.5),
+]
+
+
+def _tariff_multiplier(hour: int) -> tuple[str, float]:
+    for start, end, label, mult in _TARIFF_PERIODS:
+        if start <= hour < end:
+            return label, mult
+    return "peak", 1.0
+
+
+@dataclass
+class EnergyScheduleSlot:
+    equipment_type: str
+    plant_id: str
+    line_name: str
+    original_period: str
+    optimized_period: str
+    hours: float
+    kwh: float
+    baseline_cost: float
+    optimized_cost: float
+    savings: float
+
+    def to_dict(self) -> dict:
+        return {
+            "equipment_type": self.equipment_type,
+            "plant_id": self.plant_id,
+            "line": self.line_name,
+            "original_period": self.original_period,
+            "optimized_period": self.optimized_period,
+            "hours": round(self.hours, 1),
+            "kwh": round(self.kwh, 1),
+            "baseline_cost": round(self.baseline_cost, 2),
+            "optimized_cost": round(self.optimized_cost, 2),
+            "savings": round(self.savings, 2),
+        }
+
+
+@dataclass
+class EnergyOptimizationResult:
+    plant_id: str | None
+    period_days: int
+    baseline_cost: float = 0.0
+    optimized_cost: float = 0.0
+    total_savings: float = 0.0
+    savings_pct: float = 0.0
+    total_kwh: float = 0.0
+    kwh_by_line: dict[str, float] = field(default_factory=dict)
+    slots: list[EnergyScheduleSlot] = field(default_factory=list)
+    tariff_schedule: list[dict] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "plant_id": self.plant_id or "all",
+            "period_days": self.period_days,
+            "baseline_cost": round(self.baseline_cost, 2),
+            "optimized_cost": round(self.optimized_cost, 2),
+            "total_savings": round(self.total_savings, 2),
+            "savings_pct": round(self.savings_pct, 1),
+            "total_kwh": round(self.total_kwh, 0),
+            "kwh_by_line": {k: round(v, 1) for k, v in self.kwh_by_line.items()},
+            "tariff_schedule": self.tariff_schedule,
+            "slots": [s.to_dict() for s in self.slots],
+        }
+
+
+def optimize_energy_schedule(
+    plant_id: str | None = None,
+    period_days: int = 30,
+    utilization: float = 0.65,
+    seed: int = 42,
+) -> EnergyOptimizationResult:
+    """Schedule energy-intensive ops to off-peak tariff periods.
+
+    Returns baseline vs optimized cost comparison with per-slot detail.
+    """
+    rng = random.Random(seed)
+    result = EnergyOptimizationResult(
+        plant_id=plant_id,
+        period_days=period_days,
+        tariff_schedule=[
+            {"start": s, "end": e, "period": l, "rate_multiplier": m}
+            for s, e, l, m in _TARIFF_PERIODS
+        ],
+    )
+
+    plants = [get_plant(plant_id)] if plant_id else PLANTS
+    plants = [p for p in plants if p]
+
+    for plant in plants:
+        base_rate = _ENERGY_COSTS.get(plant.id, 0.12)
+
+        for line in plant.lines:
+            line_kwh = 0.0
+            for eq in line.equipment:
+                kwh_rate = _ENERGY_RATES.get(eq.equipment_type, 10.0)
+                running_hours = period_days * 24 * utilization * rng.uniform(0.9, 1.1)
+                total_kwh = kwh_rate * running_hours
+                line_kwh += total_kwh
+                result.total_kwh += total_kwh
+
+                is_intensive = eq.equipment_type in _ENERGY_INTENSIVE_TYPES
+
+                # Baseline: evenly distributed across all hours
+                baseline_cost = 0.0
+                for start, end, label, mult in _TARIFF_PERIODS:
+                    period_fraction = (end - start) / 24.0
+                    baseline_cost += total_kwh * period_fraction * base_rate * mult
+
+                if is_intensive:
+                    # Optimized: shift 70% of intensive ops to off-peak, 20% shoulder, 10% peak
+                    # ponytail: fixed ratios, optimizer would use LP if precision matters
+                    opt_cost = total_kwh * base_rate * (0.70 * 0.5 + 0.20 * 0.8 + 0.10 * 1.0)
+                    result.slots.append(EnergyScheduleSlot(
+                        equipment_type=eq.equipment_type,
+                        plant_id=plant.id,
+                        line_name=line.name,
+                        original_period="distributed",
+                        optimized_period="off-peak preferred",
+                        hours=running_hours,
+                        kwh=total_kwh,
+                        baseline_cost=baseline_cost,
+                        optimized_cost=opt_cost,
+                        savings=baseline_cost - opt_cost,
+                    ))
+                    result.optimized_cost += opt_cost
+                else:
+                    result.optimized_cost += baseline_cost
+
+                result.baseline_cost += baseline_cost
+
+            result.kwh_by_line[line.name] = line_kwh
+
+    result.total_savings = result.baseline_cost - result.optimized_cost
+    result.savings_pct = (result.total_savings / result.baseline_cost * 100) if result.baseline_cost > 0 else 0
+    return result
+
+
 if __name__ == "__main__":
     r = analyze_energy("PLT-001", period_days=30)
     d = r.to_dict()
@@ -212,4 +362,15 @@ if __name__ == "__main__":
     for s in d['savings_opportunities'][:3]:
         print(f"  {s['description']}: ${s['annual_cost_savings']:,.0f}/yr, payback {s['payback_months']:.0f}mo")
     assert d['total_kwh'] > 0
+
+    # Off-peak optimization check
+    opt = optimize_energy_schedule("PLT-003", period_days=30)
+    od = opt.to_dict()
+    print(f"\nOff-peak optimization PLT-003:")
+    print(f"  Baseline: ${od['baseline_cost']:,.2f}")
+    print(f"  Optimized: ${od['optimized_cost']:,.2f}")
+    print(f"  Savings: ${od['total_savings']:,.2f} ({od['savings_pct']:.1f}%)")
+    print(f"  Intensive slots shifted: {len(od['slots'])}")
+    assert od['total_savings'] > 0, "Should have savings from off-peak shifting"
+    assert od['savings_pct'] > 0, "Savings percentage should be positive"
     print("PASS")
