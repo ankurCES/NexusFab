@@ -1,7 +1,7 @@
 """Spare parts inventory module tests."""
 
 from nexusfab.optimization.spare_parts import (
-    _abc_classify,
+    _abc_simple,
     _safety_stock,
     _z_score,
     analyze_inventory,
@@ -12,9 +12,9 @@ from nexusfab.optimization.spare_parts import (
 
 
 def test_abc_classification():
-    assert _abc_classify(1000.0, 10.0) == "A"  # 10k
-    assert _abc_classify(100.0, 20.0) == "B"   # 2k
-    assert _abc_classify(10.0, 5.0) == "C"     # 50
+    assert _abc_simple(10000.0) == "A"  # 10k annual value
+    assert _abc_simple(2000.0) == "B"   # 2k annual value
+    assert _abc_simple(50.0) == "C"     # 50 annual value
 
 
 def test_z_scores_increase():

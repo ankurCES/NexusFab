@@ -2,30 +2,15 @@
 
 from fastapi import APIRouter, HTTPException
 
+from nexusfab.api.schemas.metrics import DashboardResponse, DowntimeParetoResponse, LineListItem, OEEResult, PlantListItem, PlantOEE
 from nexusfab.seed.plants import PLANTS, get_plant
 from nexusfab.services.oee import oee_from_simulation
 from nexusfab.simulation.runner import _line_config_from_seed, run_plant, run_single_line
 
-router = APIRouter(prefix="/api", tags=["metrics"])
+router = APIRouter(prefix="/api", tags=["Production"])
 
 
-@router.get("/oee/{plant_id}/{line_name}")
-async def get_line_oee(plant_id: str, line_name: str, duration_hours: float = 168.0, seed: int = 42):
-    plant = get_plant(plant_id)
-    if not plant:
-        raise HTTPException(404, f"Plant {plant_id} not found")
-
-    line_seed = next((l for l in plant.lines if l.name == line_name), None)
-    if not line_seed:
-        raise HTTPException(404, f"Line {line_name} not found")
-
-    cfg = _line_config_from_seed(line_seed, plant.category)
-    lr = run_single_line(cfg, duration_hours, seed)
-    oee_result = oee_from_simulation(lr.metrics, cfg)
-    return oee_result.to_dict()
-
-
-@router.get("/oee/plant/{plant_id}")
+@router.get("/oee/plant/{plant_id}", response_model=PlantOEE, summary="OEE summary for all lines in a plant")
 async def get_plant_oee(plant_id: str, duration_hours: float = 168.0, seed: int = 42):
     plant = get_plant(plant_id)
     if not plant:
@@ -42,7 +27,7 @@ async def get_plant_oee(plant_id: str, duration_hours: float = 168.0, seed: int 
     }
 
 
-@router.get("/metrics/dashboard")
+@router.get("/metrics/dashboard", response_model=DashboardResponse, summary="Full dashboard — all plants summary with OEE, best/worst lines")
 async def dashboard(duration_hours: float = 168.0, seed: int = 42):
     """Full dashboard payload — all plants summary."""
     plants_data = []
@@ -76,7 +61,7 @@ async def dashboard(duration_hours: float = 168.0, seed: int = 42):
     }
 
 
-@router.get("/metrics/downtime-pareto/{plant_id}")
+@router.get("/metrics/downtime-pareto/{plant_id}", response_model=DowntimeParetoResponse, summary="Downtime Pareto chart — top causes by minutes for a plant")
 async def downtime_pareto(plant_id: str, duration_hours: float = 168.0, seed: int = 42):
     result = run_plant(plant_id, duration_hours, seed)
     pareto = []
@@ -93,7 +78,23 @@ async def downtime_pareto(plant_id: str, duration_hours: float = 168.0, seed: in
     return {"plant_id": plant_id, "pareto": pareto}
 
 
-@router.get("/plants")
+@router.get("/oee/{plant_id}/{line_name}", response_model=OEEResult, summary="OEE breakdown for a single production line")
+async def get_line_oee(plant_id: str, line_name: str, duration_hours: float = 168.0, seed: int = 42):
+    plant = get_plant(plant_id)
+    if not plant:
+        raise HTTPException(404, f"Plant {plant_id} not found")
+
+    line_seed = next((l for l in plant.lines if l.name == line_name), None)
+    if not line_seed:
+        raise HTTPException(404, f"Line {line_name} not found")
+
+    cfg = _line_config_from_seed(line_seed, plant.category)
+    lr = run_single_line(cfg, duration_hours, seed)
+    oee_result = oee_from_simulation(lr.metrics, cfg)
+    return oee_result.to_dict()
+
+
+@router.get("/plants", response_model=list[PlantListItem], tags=["Plants"], summary="List all plants with geo-coordinates")
 async def list_plants():
     return [
         {
@@ -110,7 +111,7 @@ async def list_plants():
     ]
 
 
-@router.get("/plants/{plant_id}/lines")
+@router.get("/plants/{plant_id}/lines", response_model=list[LineListItem], tags=["Plants"], summary="List production lines for a plant")
 async def list_lines(plant_id: str):
     plant = get_plant(plant_id)
     if not plant:
@@ -119,7 +120,7 @@ async def list_lines(plant_id: str):
         {
             "name": l.name,
             "line_type": l.line_type,
-            "speed_units_per_min": l.speed_units_per_min,
+            "speed_units_per_min": l.rated_speed_per_min,
             "equipment_count": len(l.equipment),
         }
         for l in plant.lines

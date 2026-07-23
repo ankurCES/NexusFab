@@ -8,6 +8,9 @@ import Workforce from './pages/Workforce';
 import Energy from './pages/Energy';
 import Scenarios from './pages/Scenarios';
 import Analytics from './pages/Analytics';
+import Compliance from './pages/Compliance';
+import Sequencing from './pages/Sequencing';
+import Sensors from './pages/Sensors';
 
 export default function App() {
   return (
@@ -22,6 +25,9 @@ export default function App() {
           <Route path="/energy" element={<Energy />} />
           <Route path="/scenarios" element={<Scenarios />} />
           <Route path="/analytics" element={<Analytics />} />
+          <Route path="/compliance" element={<Compliance />} />
+          <Route path="/sequencing" element={<Sequencing />} />
+          <Route path="/sensors" element={<Sensors />} />
         </Route>
       </Routes>
     </BrowserRouter>

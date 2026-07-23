@@ -82,7 +82,7 @@ def test_cip_auto_scheduled():
     assert len(r.cip_records) > 0
     for cip in r.cip_records:
         assert cip.duration_min > 0
-        assert cip.cip_type in ("standard", "allergen", "deep_clean")
+        assert cip.cip_type in ("rinse", "standard", "allergen", "deep_clean")
 
 
 def test_haccp_ccp_monitoring():

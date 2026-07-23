@@ -349,6 +349,68 @@ export interface KpiTrending {
   trending: KpiPeriod[];
 }
 
+// Compliance & HACCP
+export interface CcpStatus {
+  id: string;
+  name: string;
+  parameter: string;
+  unit: string;
+  current_value: number;
+  lower_limit: number;
+  upper_limit: number;
+  critical_lower: number;
+  critical_upper: number;
+  status: 'PASS' | 'WARN' | 'FAIL';
+  compliance_rate_30d: number;
+  last_checked: string;
+}
+
+export interface CcpReport {
+  plant_id: string;
+  ccps: CcpStatus[];
+}
+
+export interface AllergenProduct {
+  sku: string;
+  name: string;
+  allergen_status: Record<string, 'CONTAINS' | 'MAY_CONTAIN' | 'FREE'>;
+  is_current_production: boolean;
+  next_changeover_cip_class: string | null;
+}
+
+export interface AllergenMatrix {
+  plant_id: string;
+  allergens: string[];
+  products: AllergenProduct[];
+}
+
+export interface CipEvent {
+  id: string;
+  line: string;
+  line_type: string;
+  type: string;
+  status: 'completed' | 'in_progress' | 'upcoming' | 'overdue';
+  scheduled_start: string;
+  actual_start: string | null;
+  duration_minutes: number;
+  is_uht_aseptic: boolean;
+  hard_deadline: string | null;
+}
+
+export interface CipSchedule {
+  plant_id: string;
+  events: CipEvent[];
+}
+
+export interface ComplianceScore {
+  plant_id: string;
+  score: number;
+  food_safety_score: number;
+  allergen_score: number;
+  documentation_score: number;
+  trend: { date: string; score: number }[];
+}
+
 // Energy
 export interface EquipmentEnergy {
   equipment: string;
@@ -384,4 +446,282 @@ export interface EnergyReport {
   by_equipment_type: Record<string, number>;
   savings_opportunities: SavingsOpportunity[];
   equipment_detail: EquipmentEnergy[];
+}
+
+// Production scheduling & sequencing
+export interface ScheduleBlock {
+  type: 'production' | 'changeover';
+  start: string;
+  end: string;
+  sku?: string;
+  product?: string;
+  category?: string;
+  quantity?: number;
+  order_id?: string;
+  cip_type?: string;
+  from_sku?: string;
+  to_sku?: string;
+  minutes?: number;
+}
+
+export interface LineSchedule {
+  line: string;
+  blocks: ScheduleBlock[];
+}
+
+export interface ProductionSchedule {
+  plant_id: string;
+  days: number;
+  start: string;
+  end: string;
+  horizon_hours: number;
+  total_changeover_minutes: number;
+  lines: LineSchedule[];
+}
+
+export interface SequenceSolution {
+  sequence: string[];
+  total_changeover_min: number;
+  effective_changeover_min: number;
+  smed_savings_min: number;
+  makespan: number;
+  late_orders: string[];
+  allergen_violations: number;
+  cip_interval_warning: boolean;
+  solver_status: string;
+}
+
+export interface SequenceOptimizeResult {
+  plant_id: string;
+  line_id: string;
+  products: { sku: string; name: string }[];
+  fifo: SequenceSolution;
+  optimized: SequenceSolution;
+  changeover_reduction_min: number;
+  changeover_reduction_pct: number;
+}
+
+export interface ChangeoverEntry {
+  from_sku: string;
+  to_sku: string;
+  minutes: number;
+  cip_type: string;
+  asymmetric: boolean;
+}
+
+export interface ChangeoverMatrix {
+  plant_category: string;
+  products: { sku: string; name: string; allergen_tier: number }[];
+  matrix: ChangeoverEntry[];
+  asymmetric_pairs: { from_sku: string; to_sku: string; a_to_b: number; b_to_a: number }[];
+}
+
+export interface LineKpi {
+  line: string;
+  oee: number;
+  availability: number;
+  performance: number;
+  quality: number;
+  right_first_time: number;
+  changeover_pct: number;
+  units_produced: number;
+  units_target: number;
+}
+
+export interface ProductionKpis {
+  plant_id: string;
+  plant_name: string;
+  duration_hours: number;
+  plant_oee: number;
+  total_units: number;
+  lines: LineKpi[];
+}
+
+// Network Enhanced
+export interface NetworkFlow {
+  route: string;
+  from_plant: string;
+  to_plant: string;
+  volume_tons: number;
+  cost_usd: number;
+  transit_hours: number;
+  cold_chain: boolean;
+  cost_per_pallet: number;
+  active: boolean;
+}
+
+export interface NetworkFlowsResponse {
+  flows: NetworkFlow[];
+  total_monthly_cost_usd: number;
+  active_routes: number;
+}
+
+export interface PlantLineCapacity {
+  name: string;
+  speed_upm: number;
+  pct: number;
+}
+
+export interface PlantSummaryDetail {
+  utilization: number;
+  oee: number;
+  target_oee: number;
+  capacity_tons: number;
+  available_tons: number;
+  lines: PlantLineCapacity[];
+}
+
+export interface ProductInfo {
+  sku: string;
+  name: string;
+  category: string;
+  home_plant: string;
+}
+
+export interface AllocationCell {
+  volume: number;
+  pct: number;
+}
+
+export interface AllocationResponse {
+  products: ProductInfo[];
+  plants: string[];
+  allocation: Record<string, Record<string, AllocationCell>>;
+  plant_summary: Record<string, PlantSummaryDetail>;
+}
+
+export interface AllocationPlan {
+  status: string;
+  objective_usd: number;
+  greedy_usd: number;
+  savings_pct: number;
+  gap_pct: number;
+  solve_time_sec: number;
+  cost_breakdown: { production: number; inventory: number; overtime: number };
+  line_utilization: Record<string, number>;
+  transport: TransferOption[];
+  allocation_by_plant: Record<string, Record<string, AllocationCell>>;
+}
+
+// Predictive Maintenance
+export interface EquipmentPrediction {
+  equipment_name: string;
+  equipment_type: string;
+  rul_hours: number;
+  health_index: number;
+  anomaly_score: number;
+  alert_level: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED';
+  confidence: number;
+  top_features: string[];
+  line: string;
+}
+
+export interface PlantPredictions {
+  plant_id: string;
+  equipment: EquipmentPrediction[];
+  summary: { RED: number; ORANGE: number; YELLOW: number; GREEN: number };
+}
+
+export interface FailureEvent {
+  date: string;
+  equipment: string;
+  equipment_type: string;
+  line: string;
+  failure_mode: string;
+  severity: 'minor' | 'major' | 'critical';
+  mttr_hours: number;
+  cost: number;
+}
+
+export interface FailureHistory {
+  plant_id: string;
+  days: number;
+  total_events: number;
+  events: FailureEvent[];
+  by_week: { week: string; failures: number }[];
+}
+
+export interface SparePartDetail {
+  part: string;
+  equipment_type: string;
+  unit_cost: number;
+  on_hand: number;
+  reorder_point: number;
+  lead_time_days: number;
+  abc_class: string;
+  xyz_class: string;
+  abc_xyz: string;
+  policy: string;
+  annual_demand: number;
+  safety_stock: number;
+  eoq: number;
+  stockout_risk: number;
+  needs_reorder: boolean;
+  annual_cost: number;
+  days_to_stockout: number;
+}
+
+export interface SparesStatusReport {
+  plant_id: string;
+  total_parts: number;
+  inventory_value: number;
+  needs_reorder: number;
+  high_risk: number;
+  by_abc: Record<string, number>;
+  parts: SparePartDetail[];
+}
+
+// Sensors & live PdM
+export interface EquipmentInfo {
+  name: string;
+  type: string;
+}
+
+export interface SensorReading {
+  tag: string;
+  sensor_type: string;
+  value: number;
+  unit: string;
+  setpoint: number;
+  sigma: number;
+  quality: string;
+  status: 'normal' | 'warning' | 'alarm';
+}
+
+export interface SensorReadings {
+  plant_id: string;
+  line_id: string;
+  equipment_id: string;
+  equipment_type: string;
+  timestamp: number;
+  readings: SensorReading[];
+}
+
+export interface SensorDataPoint {
+  ts: number;
+  value: number;
+  quality: string;
+  deviation: number;
+}
+
+export interface SensorSeries {
+  tag: string;
+  sensor_type: string;
+  unit: string;
+  setpoint: number;
+  sigma: number;
+  data: SensorDataPoint[];
+}
+
+export interface SensorHistory {
+  equipment_id: string;
+  equipment_type: string;
+  hours: number;
+  series: SensorSeries[];
+  failure_events: { timestamp: number; tag: string; type: string }[];
+}
+
+export interface HealthSummary {
+  plant_id: string;
+  equipment: EquipmentPrediction[];
 }

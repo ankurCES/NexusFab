@@ -271,7 +271,7 @@ def generate_schedule(
         line_formats[best_line].add(fmt)
 
     # Phase 2: optimize sequence per line
-    line_speeds = {ln.name: ln.speed_units_per_min for ln in plant.lines}
+    line_speeds = {ln.name: ln.rated_speed_per_min for ln in plant.lines}
     n_lines = max(sum(1 for v in line_orders.values() if v), 1)
     per_line_limit = solver_time_limit / n_lines
     total_changeover = 0.0

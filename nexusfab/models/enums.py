@@ -51,3 +51,20 @@ class ABCClass(str, enum.Enum):
     A = "A"
     B = "B"
     C = "C"
+
+
+class Allergen(str, enum.Enum):
+    GLUTEN = "GLUTEN"
+    DAIRY = "DAIRY"
+    NUTS = "NUTS"
+    SOY = "SOY"
+    EGGS = "EGGS"
+    SESAME = "SESAME"
+
+
+class CIPClass(str, enum.Enum):
+    NONE = "none"
+    RINSE = "rinse"
+    STANDARD = "standard"
+    ALLERGEN = "allergen"
+    DEEP_CLEAN = "deep_clean"

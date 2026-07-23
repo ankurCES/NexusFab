@@ -1,19 +1,37 @@
 import type {
+  AllergenMatrix,
+  AllocationPlan,
+  AllocationResponse,
+  CcpReport,
+  ChangeoverMatrix,
+  CipSchedule,
+  ComplianceScore,
   DashboardResponse,
   DemandPlan,
+  EquipmentInfo,
   EnergyOptimization,
   EnergyReport,
+  FailureHistory,
   FlowGraph,
+  HealthSummary,
   InventoryReport,
   KpiTrending,
   MaintenanceSchedule,
+  NetworkFlowsResponse,
   NetworkReport,
   Plant,
   PlantLine,
   PlantOEE,
+  PlantPredictions,
+  ProductionKpis,
+  ProductionSchedule,
   ScenarioResult,
   ScenarioSummary,
   ScheduleResponse,
+  SensorHistory,
+  SensorReadings,
+  SequenceOptimizeResult,
+  SparesStatusReport,
   WorkforceReport,
 } from '../types/api';
 
@@ -63,4 +81,29 @@ export const api = {
     post<ScenarioResult>('/scenarios/custom', params),
   kpiTrending: (plantId?: string, periods = 6) =>
     post<KpiTrending>('/analytics/kpi', { plant_id: plantId ?? null, periods }),
+  complianceCcps: (plantId: string) => get<CcpReport>(`/compliance/${plantId}/ccps`),
+  complianceAllergens: (plantId: string) => get<AllergenMatrix>(`/compliance/${plantId}/allergens`),
+  complianceCip: (plantId: string) => get<CipSchedule>(`/compliance/${plantId}/cip-schedule`),
+  complianceScore: (plantId: string) => get<ComplianceScore>(`/compliance/${plantId}/score`),
+  productionSchedule: (plantId: string, days = 7) =>
+    get<ProductionSchedule>(`/production/schedule/${plantId}?days=${days}`),
+  optimizeSequence: (plantId: string, lineId = '') =>
+    post<SequenceOptimizeResult>('/production/optimize-sequence', { plant_id: plantId, line_id: lineId }),
+  changeoverMatrix: (category: string) =>
+    get<ChangeoverMatrix>(`/production/changeover-matrix/${category}`),
+  productionKpis: (plantId: string) =>
+    get<ProductionKpis>(`/production/kpis/${plantId}`),
+  networkFlows: () => get<NetworkFlowsResponse>('/network/flows'),
+  networkAllocation: () => get<AllocationResponse>('/network/allocation'),
+  networkOptimize: () => get<AllocationPlan>('/network/optimize'),
+  maintenancePredictions: (plantId: string) => get<PlantPredictions>(`/maintenance/predictions/${plantId}`),
+  maintenanceHistory: (plantId: string, days = 90) => get<FailureHistory>(`/maintenance/history/${plantId}?days=${days}`),
+  sparesStatus: (plantId: string) => get<SparesStatusReport>(`/spares/status/${plantId}`),
+  sensorEquipment: (plantId: string, lineId: string) =>
+    get<EquipmentInfo[]>(`/sensors/${plantId}/${lineId}/equipment`),
+  sensorReadings: (plantId: string, lineId: string, equipmentId: string) =>
+    get<SensorReadings>(`/sensors/${plantId}/${lineId}/${equipmentId}`),
+  sensorHistory: (equipmentId: string, hours = 24) =>
+    get<SensorHistory>(`/sensors/${equipmentId}/history?hours=${hours}`),
+  healthSummary: (plantId: string) => get<HealthSummary>(`/maintenance/health/${plantId}`),
 };

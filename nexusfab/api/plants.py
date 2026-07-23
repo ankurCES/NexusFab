@@ -7,11 +7,12 @@ from sqlalchemy.orm import selectinload
 
 from nexusfab.database import get_session
 from nexusfab.models.plant import Plant
+from nexusfab.api.schemas.plants import PlantDetail, PlantSummary
 
-router = APIRouter(prefix="/plants", tags=["plants"])
+router = APIRouter(prefix="/plants", tags=["Plants"])
 
 
-@router.get("/")
+@router.get("/", response_model=list[PlantSummary], summary="List all manufacturing plants")
 async def list_plants(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
         select(Plant).options(selectinload(Plant.lines)).order_by(Plant.name)
@@ -31,7 +32,7 @@ async def list_plants(session: AsyncSession = Depends(get_session)):
     ]
 
 
-@router.get("/{plant_id}")
+@router.get("/{plant_id}", response_model=PlantDetail, summary="Get plant detail with production lines")
 async def get_plant(plant_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     result = await session.execute(
         select(Plant).options(selectinload(Plant.lines)).where(Plant.id == plant_id)

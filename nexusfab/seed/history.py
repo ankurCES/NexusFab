@@ -132,7 +132,7 @@ def generate_history(days: int = 30, seed: int = 42) -> HistoryData:
                         run_start = shift_start + timedelta(minutes=r * run_duration)
                         run_end = run_start + timedelta(minutes=run_duration)
 
-                        ideal_qty = int(line.speed_units_per_min * run_duration * perf)
+                        ideal_qty = int(line.rated_speed_per_min * run_duration * perf)
                         actual_qty = int(ideal_qty * avail)
                         good_qty = int(actual_qty * qual)
 
@@ -141,7 +141,7 @@ def generate_history(days: int = 30, seed: int = 42) -> HistoryData:
                             product_sku=product.sku,
                             start_time=run_start, end_time=run_end,
                             shift=shift,
-                            planned_qty=int(line.speed_units_per_min * run_duration),
+                            planned_qty=int(line.rated_speed_per_min * run_duration),
                             actual_qty=actual_qty, good_qty=good_qty,
                         ))
                         shift_produced += actual_qty

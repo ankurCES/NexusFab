@@ -3,6 +3,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from nexusfab.api.schemas.energy import EnergyOptimizeResult, EnergyReport
+from nexusfab.api.schemas.simulation import ScenarioRunResult, SimulationResult
 from nexusfab.optimization.energy import analyze_energy, optimize_energy_schedule
 from nexusfab.seed.plants import PLANTS
 from nexusfab.simulation.runner import run_network, run_plant, run_scenario
@@ -12,7 +14,7 @@ from nexusfab.simulation.scenarios import (
     list_scenarios,
 )
 
-router = APIRouter(tags=["energy-scenarios"])
+router = APIRouter()
 
 
 # ── Energy optimization ──
@@ -24,7 +26,7 @@ class EnergyOptimizeRequest(BaseModel):
     utilization: float = Field(default=0.65, ge=0.1, le=1.0)
 
 
-@router.post("/api/energy/optimize")
+@router.post("/api/energy/optimize", response_model=EnergyOptimizeResult, tags=["Energy"], summary="Optimize energy schedule — peak shaving and off-peak load shifting")
 async def optimize_energy(req: EnergyOptimizeRequest):
     result = optimize_energy_schedule(
         plant_id=req.plant_id,
@@ -55,12 +57,12 @@ class CustomScenarioRequest(BaseModel):
     workforce_availability: float = Field(default=1.0, ge=0.1, le=1.0)
 
 
-@router.get("/api/scenarios")
+@router.get("/api/scenarios", response_model=list[ScenarioRunResult], tags=["Simulation"], summary="List all seeded what-if scenarios")
 async def get_all_scenarios():
     return list_scenarios()
 
 
-@router.post("/api/scenarios/run")
+@router.post("/api/scenarios/run", response_model=SimulationResult, tags=["Simulation"], summary="Run a seeded scenario by ID")
 async def run_seeded_scenario(req: ScenarioRunRequest):
     scenario = get_scenario(req.scenario_id)
     if not scenario:
@@ -68,7 +70,7 @@ async def run_seeded_scenario(req: ScenarioRunRequest):
     return run_scenario(scenario)
 
 
-@router.post("/api/scenarios/custom")
+@router.post("/api/scenarios/custom", response_model=SimulationResult, tags=["Simulation"], summary="Run a fully parameterized custom what-if scenario")
 async def run_custom_scenario(req: CustomScenarioRequest):
     from nexusfab.seed.plants import get_plant
 
@@ -92,7 +94,7 @@ async def run_custom_scenario(req: CustomScenarioRequest):
     return run_scenario(scenario)
 
 
-@router.post("/api/scenarios/run-all")
+@router.post("/api/scenarios/run-all", response_model=SimulationResult, tags=["Simulation"], summary="Run all seeded scenarios and return a summary table")
 async def run_all_scenarios():
     """Run all 10 seeded scenarios and return summary results."""
     from nexusfab.simulation.scenarios import SCENARIOS
@@ -121,7 +123,7 @@ class KpiRequest(BaseModel):
     period_hours: float = Field(default=168.0, ge=24, le=720)
 
 
-@router.post("/api/analytics/kpi")
+@router.post("/api/analytics/kpi", response_model=SimulationResult, tags=["Production"], summary="KPI trends over multiple periods — OEE, energy, waste, OTIF")
 async def get_kpi_trending(req: KpiRequest):
     """Generate KPI trends over multiple periods for OEE, energy, production."""
     trending = []

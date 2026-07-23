@@ -3,11 +3,12 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from nexusfab.api.schemas.simulation import ScenarioRunResult, SimulationResult
 from nexusfab.seed.plants import get_plant
 from nexusfab.simulation.runner import _line_config_from_seed, run_plant, run_single_line
 from nexusfab.simulation.scenarios import get_scenario, list_scenarios
 
-router = APIRouter(prefix="/api/simulate", tags=["simulation"])
+router = APIRouter(prefix="/api/simulate", tags=["Simulation"])
 
 
 class SimulateRequest(BaseModel):
@@ -22,7 +23,7 @@ class ScenarioRunRequest(BaseModel):
     seed: int | None = None
 
 
-@router.post("/run")
+@router.post("/run", response_model=SimulationResult, summary="Run discrete-event simulation for a plant or single line")
 async def run_simulation(req: SimulateRequest):
     plant = get_plant(req.plant_id)
     if not plant:
@@ -51,7 +52,7 @@ async def run_simulation(req: SimulateRequest):
     return result.to_dict()
 
 
-@router.post("/scenario")
+@router.post("/scenario", response_model=ScenarioRunResult, summary="Run a seeded what-if scenario")
 async def run_scenario(req: ScenarioRunRequest):
     scenario = get_scenario(req.scenario_id)
     if not scenario:
@@ -68,6 +69,6 @@ async def run_scenario(req: ScenarioRunRequest):
     }
 
 
-@router.get("/scenarios")
+@router.get("/scenarios", response_model=list[ScenarioRunResult], summary="List all available simulation scenarios")
 async def get_scenarios():
     return list_scenarios()

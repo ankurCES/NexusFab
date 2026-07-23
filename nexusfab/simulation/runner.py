@@ -1,11 +1,16 @@
 """Simulation runner and event collector."""
 
 import random
+import time
 from dataclasses import dataclass, field
+
+# Health probe sentinels — updated on each run_plant call
+_sim_last_at: float = time.monotonic()
+_sim_events_total: int = 0
 
 import simpy
 
-from nexusfab.seed.plants import PlantSeed, get_plant
+from nexusfab.seed.plants import CIP_SCHEDULES, PlantSeed, get_plant
 from nexusfab.simulation.line_model import (
     EquipmentConfig,
     LineConfig,
@@ -33,6 +38,9 @@ class SimulationResult:
     total_events: int = 0
     total_failures: int = 0
     total_units: int = 0
+    absence_rate: float = 0.0
+    overtime_hours: float = 0.0
+    labor_cost_per_hour: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -42,6 +50,9 @@ class SimulationResult:
             "total_events": self.total_events,
             "total_failures": self.total_failures,
             "total_units": self.total_units,
+            "absence_rate": round(self.absence_rate, 4),
+            "overtime_hours": round(self.overtime_hours, 1),
+            "labor_cost_per_hour": round(self.labor_cost_per_hour, 2),
             "lines": [
                 {
                     "name": lr.line_name,
@@ -58,14 +69,22 @@ class SimulationResult:
         }
 
 
-# Per-category tuning to hit requirements starting OEE targets
+# Per-category tuning (micro-stops and quality only; speed_factor derived per-line from equipment)
 _CATEGORY_TUNING = {
-    "WATER":          {"speed_factor": 0.82, "micro_stop_probability": 0.04, "quality_rate": 0.97},
-    "CONFECTIONERY":  {"speed_factor": 0.75, "micro_stop_probability": 0.06, "quality_rate": 0.96},
-    "DAIRY":          {"speed_factor": 0.70, "micro_stop_probability": 0.07, "quality_rate": 0.95},
-    "PET_FOOD":       {"speed_factor": 0.80, "micro_stop_probability": 0.04, "quality_rate": 0.97},
-    "PREPARED_FOODS": {"speed_factor": 0.72, "micro_stop_probability": 0.06, "quality_rate": 0.96},
+    "WATER":          {"micro_stop_probability": 0.04, "quality_rate": 0.97},
+    "CONFECTIONERY":  {"micro_stop_probability": 0.06, "quality_rate": 0.96},
+    "DAIRY":          {"micro_stop_probability": 0.07, "quality_rate": 0.95},
+    "PET_FOOD":       {"micro_stop_probability": 0.04, "quality_rate": 0.97},
+    "PREPARED_FOODS": {"micro_stop_probability": 0.06, "quality_rate": 0.96},
 }
+
+
+def _speed_factor_from_equipment(line_seed) -> float:
+    # ponytail: linear from min MTBF on the line, upgrade to curve fit if OEE calibration drifts
+    if not line_seed.equipment:
+        return 0.75
+    min_mtbf = min(eq.mtbf_hours for eq in line_seed.equipment)
+    return min(0.92, 0.60 + min_mtbf / 1000)
 
 
 def _line_config_from_seed(line_seed, plant_category: str = "WATER") -> LineConfig:
@@ -75,31 +94,49 @@ def _line_config_from_seed(line_seed, plant_category: str = "WATER") -> LineConf
             equipment_type=eq.equipment_type,
             mtbf_hours=eq.mtbf_hours,
             mttr_hours=eq.mttr_hours,
+            weibull_beta=eq.weibull_beta,
+            weibull_eta=eq.weibull_eta,
         )
         for eq in line_seed.equipment
     ]
     tuning = _CATEGORY_TUNING.get(plant_category, _CATEGORY_TUNING["WATER"])
+    cip = CIP_SCHEDULES.get(line_seed.line_type, {})
     return LineConfig(
         name=line_seed.name,
         line_type=line_seed.line_type,
-        speed_units_per_min=line_seed.speed_units_per_min,
+        speed_units_per_min=line_seed.rated_speed_per_min,
         equipment=equipment,
-        speed_factor=tuning["speed_factor"],
+        speed_factor=_speed_factor_from_equipment(line_seed),
         micro_stop_probability=tuning["micro_stop_probability"],
         quality_rate=tuning["quality_rate"],
+        cip_frequency_hours=cip.get("frequency_hours", 0),
+        cip_duration_range=cip.get("duration_min", (0, 0)),
     )
+
+
+def _workforce_driver(env, line, schedule):
+    """SimPy process: steps through precomputed (minute, factor) change points."""
+    for minute, factor in schedule:
+        if minute > env.now:
+            yield env.timeout(minute - env.now)
+        line.workforce_factor = factor
 
 
 def run_single_line(
     line_config: LineConfig,
     duration_hours: float = 168.0,  # 1 week
     seed: int = 42,
+    workforce_schedule: list[tuple[float, float]] | None = None,
 ) -> LineResult:
     """Run simulation for a single production line."""
     rng = random.Random(seed)
     env = simpy.Environment()
     line = ProductionLine(env, line_config, rng)
+    if workforce_schedule:
+        line.workforce_factor = workforce_schedule[0][1]
     line.start()
+    if workforce_schedule:
+        env.process(_workforce_driver(env, line, workforce_schedule))
     env.run(until=duration_hours * 60)  # minutes
 
     m = line.metrics
@@ -127,6 +164,7 @@ def run_plant(
     duration_hours: float = 168.0,
     seed: int = 42,
     line_names: list[str] | None = None,
+    workforce_schedule: list[tuple[float, float]] | None = None,
 ) -> SimulationResult:
     """Run simulation for all lines in a plant (or subset)."""
     plant = get_plant(plant_id)
@@ -141,7 +179,7 @@ def run_plant(
 
     for i, line_seed in enumerate(lines):
         cfg = _line_config_from_seed(line_seed, plant.category)
-        lr = run_single_line(cfg, duration_hours, seed + i)
+        lr = run_single_line(cfg, duration_hours, seed + i, workforce_schedule)
         result.line_results.append(lr)
         result.total_events += len(lr.events)
         result.total_failures += lr.metrics.failures
@@ -149,6 +187,15 @@ def run_plant(
 
     if result.line_results:
         result.plant_oee = sum(lr.oee for lr in result.line_results) / len(result.line_results)
+
+    global _sim_last_at, _sim_events_total
+    _sim_last_at = time.monotonic()
+    _sim_events_total += result.total_events
+
+    from nexusfab.optimization.workforce import calculate_labor_cost
+    period_days = max(1, int(duration_hours / 24))
+    lc = calculate_labor_cost(plant_id, period_days=period_days)
+    result.labor_cost_per_hour = lc["labor_cost_per_hour"]
 
     return result
 
@@ -231,7 +278,7 @@ def run_scenario(scenario) -> dict:
         if m.running_time > 0:
             for line_seed in (get_plant(scenario.plant_id).lines or []):
                 if line_seed.name == lr.line_name:
-                    ideal_output = line_seed.speed_units_per_min * m.running_time
+                    ideal_output = line_seed.rated_speed_per_min * m.running_time
                     break
         lr.performance = (total_output / ideal_output) if ideal_output > 0 else 0.0
         lr.quality = (m.units_produced / total_output) if total_output > 0 else 0.0

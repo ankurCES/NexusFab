@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from nexusfab.api.schemas.optimization import RerouteResult, ScheduleResult
 from nexusfab.optimization.rerouting import suggest_reroute
 from nexusfab.optimization.scheduling import (
     ProductionOrder,
@@ -12,7 +13,7 @@ from nexusfab.optimization.scheduling import (
     generate_schedule,
 )
 
-router = APIRouter(prefix="/api/optimize", tags=["optimization"])
+router = APIRouter(prefix="/api/optimize", tags=["Production"])
 
 
 class ScheduleRequest(BaseModel):
@@ -36,7 +37,7 @@ class RerouteRequest(BaseModel):
     utilizations: dict[str, float] | None = None
 
 
-@router.post("/schedule")
+@router.post("/schedule", response_model=ScheduleResult, summary="Generate production schedule from sample orders")
 async def create_schedule(req: ScheduleRequest):
     orders = generate_sample_orders(req.plant_id, req.n_orders, req.seed)
     if not orders:
@@ -45,7 +46,7 @@ async def create_schedule(req: ScheduleRequest):
     return result.to_dict()
 
 
-@router.post("/schedule/custom")
+@router.post("/schedule/custom", response_model=ScheduleResult, summary="Generate production schedule from custom orders")
 async def create_custom_schedule(req: CustomScheduleRequest):
     orders = []
     for o in req.orders:
@@ -60,7 +61,7 @@ async def create_custom_schedule(req: CustomScheduleRequest):
     return result.to_dict()
 
 
-@router.post("/reroute")
+@router.post("/reroute", response_model=RerouteResult, summary="Suggest alternative lines when a line fails — considers network capacity and transport cost")
 async def suggest_line_reroute(req: RerouteRequest):
     try:
         result = suggest_reroute(

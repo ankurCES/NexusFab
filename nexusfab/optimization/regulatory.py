@@ -10,12 +10,18 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from nexusfab.seed.plants import PLANTS, get_plant
-from nexusfab.seed.products import PRODUCTS, get_changeover_time, get_products_for_plant
+from nexusfab.seed.products import (
+    CIP_CLASS_REQUIREMENTS,
+    PRODUCTS,
+    compute_allergen_tier,
+    get_changeover_time,
+    get_products_for_plant,
+)
 
 
 # ── Allergen sequencing ──
 
-ALLERGEN_SEVERITY = {"NUTS": 3, "DAIRY": 2, "GLUTEN": 1, "SOY": 1}
+ALLERGEN_SEVERITY = {"NUTS": 4, "EGGS": 3, "DAIRY": 2, "SOY": 2, "SESAME": 2, "GLUTEN": 1}
 
 
 @dataclass
@@ -25,7 +31,9 @@ class AllergenSequenceRule:
     allergens_introduced: list[str]
     requires_cip: bool
     cip_duration_min: float
-    sequence_ok: bool  # True if from→to is permitted (non-allergen before allergen)
+    cip_class: str  # none | rinse | standard | allergen | deep_clean
+    cip_validation_min: float  # LFD 15min, ELISA 30min hold
+    sequence_ok: bool  # True if from→to is permitted (lower tier → higher tier)
 
     def to_dict(self) -> dict:
         return {
@@ -34,41 +42,51 @@ class AllergenSequenceRule:
             "allergens_introduced": self.allergens_introduced,
             "requires_cip": self.requires_cip,
             "cip_duration_min": self.cip_duration_min,
+            "cip_class": self.cip_class,
+            "cip_validation_min": self.cip_validation_min,
             "sequence_ok": self.sequence_ok,
         }
 
 
 def check_allergen_sequence(from_sku: str, to_sku: str) -> AllergenSequenceRule:
-    """Check if transitioning from_sku → to_sku is allergen-safe."""
+    """Check if transitioning from_sku → to_sku is allergen-safe using 5-tier CIP classes."""
     from nexusfab.seed.products import get_product
     p1 = get_product(from_sku)
     p2 = get_product(to_sku)
     a1 = set(p1.allergens) if p1 else set()
     a2 = set(p2.allergens) if p2 else set()
     introduced = sorted(a2 - a1)
-    requires_cip = bool(introduced)
-    cip_min = 0.0
-    if requires_cip:
-        # CIP duration scales with allergen severity
-        cip_min = 30.0 + sum(ALLERGEN_SEVERITY.get(a, 1) * 15 for a in introduced)
-    # Sequence OK: going from allergen→non-allergen requires full CIP, but is flagged
-    reverse = bool(a1 - a2) and not a2
+
+    tier_from = compute_allergen_tier(sorted(a1))
+    tier_to = compute_allergen_tier(sorted(a2))
+    cip_class, cip_duration, validation = CIP_CLASS_REQUIREMENTS[(tier_from, tier_to)]
+    validation_min = {"ELISA": 30.0, "LFD": 15.0}.get(validation, 0.0)
+
+    requires_cip = cip_class not in ("none", "rinse")
+    # same-tier rinse still required if new allergens introduced
+    if introduced and cip_class == "rinse":
+        requires_cip = True
+
     return AllergenSequenceRule(
         from_sku=from_sku,
         to_sku=to_sku,
         allergens_introduced=introduced,
-        requires_cip=requires_cip or reverse,
-        cip_duration_min=cip_min if not reverse else 90.0,
-        sequence_ok=not reverse,  # allergen→non-allergen is a violation unless CIP
+        requires_cip=requires_cip,
+        cip_duration_min=cip_duration,
+        cip_class=cip_class,
+        cip_validation_min=validation_min,
+        sequence_ok=tier_from <= tier_to,
     )
 
 
 # ── CIP validation tracking ──
 
 CIP_TYPES = {
+    "none": {"duration_min": 0, "chemicals": []},
+    "rinse": {"duration_min": 15, "chemicals": ["water"]},
     "standard": {"duration_min": 45, "chemicals": ["caustic", "acid", "sanitizer"]},
-    "allergen": {"duration_min": 75, "chemicals": ["caustic", "acid", "sanitizer", "allergen_rinse"]},
-    "deep_clean": {"duration_min": 120, "chemicals": ["caustic", "acid", "sanitizer", "allergen_rinse", "enzymatic"]},
+    "allergen": {"duration_min": 75, "chemicals": ["caustic", "acid", "sanitizer", "allergen_surfactant"]},
+    "deep_clean": {"duration_min": 120, "chemicals": ["caustic", "acid", "sanitizer", "allergen_surfactant", "enzymatic"]},
 }
 
 
@@ -103,27 +121,25 @@ class CIPRecord:
 # ── HACCP CCP monitoring ──
 
 # ponytail: static CCP definitions per line type. Real system would be DB-backed.
+# All 18 CCPs: 17 from nestle-compliance.md §3.1.1 + CCP-W4 for CANNING (100% line coverage).
 HACCP_CCPS = {
-    "UHT_FILLING": [
-        {"ccp_id": "CCP-01", "name": "Pasteurization Temperature", "target": 137.0, "unit": "°C",
-         "critical_limit_low": 135.0, "critical_limit_high": 145.0, "frequency_min": 5},
-        {"ccp_id": "CCP-02", "name": "Hold Time", "target": 4.0, "unit": "sec",
-         "critical_limit_low": 3.5, "critical_limit_high": None, "frequency_min": 5},
+    # ── PLT-001 Water ──
+    "PET_BOTTLING": [
+        {"ccp_id": "CCP-W1", "name": "Ozone Concentration", "target": 0.3, "unit": "mg/L",
+         "critical_limit_low": 0.2, "critical_limit_high": 0.4, "frequency_min": 1},
+        {"ccp_id": "CCP-W2", "name": "UV Dose (254 nm)", "target": 40.0, "unit": "mJ/cm²",
+         "critical_limit_low": 40.0, "critical_limit_high": None, "frequency_min": 1},
     ],
-    "ASEPTIC": [
-        {"ccp_id": "CCP-03", "name": "Sterilization Temperature", "target": 142.0, "unit": "°C",
-         "critical_limit_low": 140.0, "critical_limit_high": 150.0, "frequency_min": 3},
+    "GLASS_BOTTLING": [
+        {"ccp_id": "CCP-W3", "name": "Bottle Rinse Temperature", "target": 85.0, "unit": "°C",
+         "critical_limit_low": 82.0, "critical_limit_high": None, "frequency_min": 15},
     ],
-    "RETORT_CANNING": [
-        {"ccp_id": "CCP-04", "name": "Retort Temperature", "target": 121.0, "unit": "°C",
-         "critical_limit_low": 118.0, "critical_limit_high": 130.0, "frequency_min": 5},
-        {"ccp_id": "CCP-05", "name": "Retort Pressure", "target": 1.05, "unit": "bar",
-         "critical_limit_low": 0.95, "critical_limit_high": 1.15, "frequency_min": 5},
+    "CANNING": [
+        # ponytail: not in research doc, added for 100% coverage. Mirrors GLASS_BOTTLING rinse CCP.
+        {"ccp_id": "CCP-W4", "name": "Can Rinse Temperature", "target": 85.0, "unit": "°C",
+         "critical_limit_low": 82.0, "critical_limit_high": None, "frequency_min": 15},
     ],
-    "POWDER_PACKING": [
-        {"ccp_id": "CCP-06", "name": "Metal Detection", "target": 0.0, "unit": "ppm",
-         "critical_limit_low": None, "critical_limit_high": 0.5, "frequency_min": 1},
-    ],
+    # ── PLT-002 Confectionery ──
     "MOULDING": [
         {"ccp_id": "CCP-07", "name": "Tempering Temperature", "target": 31.0, "unit": "°C",
          "critical_limit_low": 29.0, "critical_limit_high": 33.0, "frequency_min": 10},
@@ -132,13 +148,52 @@ HACCP_CCPS = {
         {"ccp_id": "CCP-08", "name": "Enrobing Temperature", "target": 32.0, "unit": "°C",
          "critical_limit_low": 30.0, "critical_limit_high": 34.0, "frequency_min": 10},
     ],
+    "WRAPPING": [
+        {"ccp_id": "CCP-C3", "name": "Metal Detection", "target": 0.0, "unit": "ppm",
+         "critical_limit_low": None, "critical_limit_high": 0.5, "frequency_min": 1},
+    ],
+    # ── PLT-003 Dairy ──
+    "UHT_FILLING": [
+        {"ccp_id": "CCP-01", "name": "Pasteurization Temperature", "target": 137.0, "unit": "°C",
+         "critical_limit_low": 135.0, "critical_limit_high": 145.0, "frequency_min": 5},
+        {"ccp_id": "CCP-02", "name": "Hold Time", "target": 4.0, "unit": "sec",
+         "critical_limit_low": 3.5, "critical_limit_high": None, "frequency_min": 5},
+    ],
+    "POWDER_PACKING": [
+        {"ccp_id": "CCP-06", "name": "Metal Detection", "target": 0.0, "unit": "ppm",
+         "critical_limit_low": None, "critical_limit_high": 0.5, "frequency_min": 1},
+    ],
+    "ASEPTIC": [
+        {"ccp_id": "CCP-03", "name": "Sterilization Temperature", "target": 142.0, "unit": "°C",
+         "critical_limit_low": 140.0, "critical_limit_high": 150.0, "frequency_min": 3},
+    ],
+    # ── PLT-004 Pet Food ──
+    "EXTRUSION": [
+        {"ccp_id": "CCP-10", "name": "Extrusion Temperature", "target": 140.0, "unit": "°C",
+         "critical_limit_low": 130.0, "critical_limit_high": 155.0, "frequency_min": 5},
+    ],
+    "RETORT_CANNING": [
+        {"ccp_id": "CCP-04", "name": "Retort Temperature", "target": 121.0, "unit": "°C",
+         "critical_limit_low": 118.0, "critical_limit_high": 130.0, "frequency_min": 5},
+        {"ccp_id": "CCP-05", "name": "Retort Pressure", "target": 1.05, "unit": "bar",
+         "critical_limit_low": 0.95, "critical_limit_high": 1.15, "frequency_min": 5},
+    ],
+    "KIBBLE_COATING": [
+        {"ccp_id": "CCP-P4", "name": "Moisture Activity", "target": 0.55, "unit": "aw",
+         "critical_limit_low": None, "critical_limit_high": 0.65, "frequency_min": 30},
+    ],
+    # ── PLT-005 Prepared Foods ──
     "MIXING_COOKING": [
         {"ccp_id": "CCP-09", "name": "Cooking Temperature", "target": 95.0, "unit": "°C",
          "critical_limit_low": 90.0, "critical_limit_high": 100.0, "frequency_min": 5},
     ],
-    "EXTRUSION": [
-        {"ccp_id": "CCP-10", "name": "Extrusion Temperature", "target": 140.0, "unit": "°C",
-         "critical_limit_low": 130.0, "critical_limit_high": 155.0, "frequency_min": 5},
+    "FILLING": [
+        {"ccp_id": "CCP-F2", "name": "Fill Temperature (Hot-Fill)", "target": 88.0, "unit": "°C",
+         "critical_limit_low": 85.0, "critical_limit_high": None, "frequency_min": 5},
+    ],
+    "NOODLE_LINE": [
+        {"ccp_id": "CCP-N3", "name": "Frying Oil Temperature", "target": 150.0, "unit": "°C",
+         "critical_limit_low": 140.0, "critical_limit_high": 160.0, "frequency_min": 5},
     ],
 }
 
@@ -306,8 +361,8 @@ def generate_compliance_report(
                         # Generate CIP if needed
                         if allergen_check.requires_cip:
                             cip_counter += 1
-                            cip_type = "allergen" if allergen_check.allergens_introduced else "standard"
-                            cip_dur = CIP_TYPES[cip_type]["duration_min"]
+                            cip_type = allergen_check.cip_class
+                            cip_dur = allergen_check.cip_duration_min + allergen_check.cip_validation_min
                             cip_start = current_time
                             cip_end = cip_start + timedelta(minutes=cip_dur)
                             validated = rng.random() > 0.05  # 95% validation rate
@@ -444,6 +499,13 @@ def generate_compliance_report(
 
 
 if __name__ == "__main__":
+    # CCP coverage check: every line type in the plant network must have ≥1 CCP
+    all_line_types = {ls.line_type for ps in PLANTS for ls in ps.lines}
+    missing = all_line_types - set(HACCP_CCPS)
+    assert not missing, f"Line types missing CCPs: {missing}"
+    print(f"CCP coverage: {len(HACCP_CCPS)}/{len(all_line_types)} line types, "
+          f"{sum(len(v) for v in HACCP_CCPS.values())} total CCPs — 100%")
+
     r = generate_compliance_report("PLT-002", days=3)
     d = r.to_dict()
     print(f"PLT-002 Compliance Report:")
@@ -455,10 +517,32 @@ if __name__ == "__main__":
     assert d['total_batches'] > 0
     assert d['ccp_compliance_pct'] > 80  # should be ~97%
     assert d['cip_validation_pct'] > 80  # should be ~95%
-    # Every batch must have a batch_id
     assert all(b['batch_id'] for b in d['batch_records'])
-    # Allergen transitions that introduce new allergens must require CIP
     for ac in d['allergen_checks']:
         if ac['allergens_introduced']:
             assert ac['requires_cip'], f"Missing CIP for {ac}"
+
+    # 5-tier CIP class checks
+    rule_nut_clean = check_allergen_sequence("CON-NUT", "WAT-500S")
+    assert rule_nut_clean.cip_class == "deep_clean", f"nut→water should be deep_clean, got {rule_nut_clean.cip_class}"
+    assert rule_nut_clean.cip_duration_min == 120.0
+    assert rule_nut_clean.cip_validation_min == 30.0, "ELISA hold = 30 min"
+    assert not rule_nut_clean.sequence_ok, "tier 4→0 is a sequencing violation"
+
+    rule_upgrade = check_allergen_sequence("WAT-500S", "CON-KB4")
+    assert rule_upgrade.cip_class == "allergen", f"water→egg product should be allergen, got {rule_upgrade.cip_class}"
+    assert rule_upgrade.cip_validation_min == 15.0, "LFD hold = 15 min"
+    assert rule_upgrade.sequence_ok, "tier 0→3 is OK (upgrade)"
+
+    rule_same = check_allergen_sequence("DAI-P4", "DAI-L2")
+    assert rule_same.cip_class == "rinse", f"same-tier dairy should be rinse, got {rule_same.cip_class}"
+
+    print(f"  5-tier CIP: nut→clean={rule_nut_clean.cip_class}/{rule_nut_clean.cip_duration_min}min, "
+          f"upgrade={rule_upgrade.cip_class}/{rule_upgrade.cip_duration_min}min")
+
+    # Full-network report: all plants should generate CCP readings
+    r_all = generate_compliance_report(days=3)
+    line_types_with_readings = {reading.line_name for reading in r_all.ccp_readings}
+    print(f"  Lines with CCP readings: {len(line_types_with_readings)}")
+    assert len(r_all.ccp_readings) > 0, "No CCP readings generated"
     print("PASS")

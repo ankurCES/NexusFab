@@ -8,6 +8,9 @@ const links = [
   { to: '/energy', label: 'Energy', icon: '⚡' },
   { to: '/scenarios', label: 'Scenarios', icon: '🔬' },
   { to: '/analytics', label: 'Analytics', icon: '📈' },
+  { to: '/compliance', label: 'Compliance', icon: '✅' },
+  { to: '/sequencing', label: 'Sequencing', icon: '🏭' },
+  { to: '/sensors', label: 'Sensors', icon: '📡' },
 ];
 
 export default function Layout() {

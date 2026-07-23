@@ -421,6 +421,107 @@ def generate_workforce(
     return report
 
 
+# ── Labor cost constants (§2.4 energy-workforce-simulation research) ──
+
+WAGE_RATES: dict[str, float] = {
+    "operator": 25.0, "senior_operator": 29.0, "technician": 34.0,
+    "supervisor": 43.0, "qa_inspector": 31.5,
+}
+BURDEN_MULTIPLIER = 1.35
+
+PREMIUM_NIGHT = 1.10
+PREMIUM_SAT = 1.15
+PREMIUM_SUN = 1.25
+PREMIUM_HOLIDAY = 2.00
+OT_MULT = 1.50
+DOUBLE_OT_MULT = 2.00
+
+PLANT_COL: dict[str, float] = {
+    "PLT-001": 0.95,  # Arlington TX
+    "PLT-002": 0.92,  # Burlington WI
+    "PLT-003": 1.15,  # Modesto CA
+    "PLT-004": 1.05,  # Denver CO
+    "PLT-005": 0.88,  # Gaffney SC
+}
+
+# ponytail: fixed default roster, override per-plant when actual headcounts known
+DEFAULT_ROSTER: dict[str, int] = {
+    "operator": 36, "senior_operator": 12, "technician": 9,
+    "supervisor": 3, "qa_inspector": 6,
+}
+
+
+def calculate_labor_cost(
+    plant_id: str,
+    shift_roster: dict[str, int] | None = None,
+    period_days: int = 30,
+    holiday_days: int = 0,
+    avg_weekly_hours: float = 42.0,
+) -> dict:
+    """Fully-burdened labor cost with multiplicatively stacking premiums.
+
+    shift_roster: {role: headcount} total workers per role (defaults to DEFAULT_ROSTER).
+    """
+    if shift_roster is None:
+        shift_roster = DEFAULT_ROSTER
+    col = PLANT_COL.get(plant_id, 1.0)
+    weeks = period_days / 7
+    night_f = 1 / 3
+    hol_f = holiday_days / period_days if period_days else 0.0
+
+    # ponytail: analytical expected multiplier per independent category, O(1) per role
+    e_shift = (1 - night_f) + night_f * PREMIUM_NIGHT
+    e_day = (max(0.0, 5 / 7 - hol_f) + 1 / 7 * PREMIUM_SAT
+             + 1 / 7 * PREMIUM_SUN + hol_f * PREMIUM_HOLIDAY)
+    awh = avg_weekly_hours or 40.0
+    reg = min(40.0, awh)
+    ot = max(0.0, min(60.0, awh) - 40.0)
+    dot = max(0.0, awh - 60.0)
+    e_ot = (reg + ot * OT_MULT + dot * DOUBLE_OT_MULT) / awh
+    eff = e_shift * e_day * e_ot
+
+    total = 0.0
+    breakdown: dict[str, float] = {}
+    base_sum = 0.0
+
+    for role, count in shift_roster.items():
+        rate = WAGE_RATES.get(role)
+        if rate is None:
+            continue
+        burdened = rate * BURDEN_MULTIPLIER * col
+        hours = awh * weeks * count
+        base = hours * burdened
+        breakdown[role] = round(base * eff, 2)
+        total += base * eff
+        base_sum += base
+
+    premiums = {
+        "night": round(base_sum * (e_shift - 1) * e_day * e_ot, 2),
+        "weekend": round(base_sum * e_shift * e_ot * (
+            1 / 7 * (PREMIUM_SAT - 1) + 1 / 7 * (PREMIUM_SUN - 1)), 2),
+        "holiday": round(base_sum * e_shift * e_ot * hol_f * (PREMIUM_HOLIDAY - 1), 2),
+        "overtime": round(base_sum * e_shift * e_day * ot / awh * (OT_MULT - 1), 2),
+        "double_overtime": round(base_sum * e_shift * e_day * dot / awh * (DOUBLE_OT_MULT - 1), 2),
+    }
+
+    return {
+        "total": round(total, 2),
+        "breakdown_by_role": breakdown,
+        "premium_costs": premiums,
+        "overtime_pct": round((ot + dot) / awh * 100, 2),
+        "labor_cost_per_hour": round(total / (period_days * 24) if period_days else 0, 2),
+    }
+
+
+def cost_per_unit(plant_id: str, units_produced: int, period_days: int = 30,
+                  shift_roster: dict[str, int] | None = None) -> float:
+    """Labor component of COGS: total labor cost / units produced."""
+    if units_produced <= 0:
+        return 0.0
+    lc = calculate_labor_cost(plant_id, shift_roster, period_days)
+    return round(lc["total"] / units_produced, 4)
+
+
 if __name__ == "__main__":
     r = generate_workforce("PLT-001")
     d = r.to_dict()
@@ -434,6 +535,21 @@ if __name__ == "__main__":
     assert d['total_operators'] > 0
     assert d['total_overtime_hours'] >= 0
     assert len(d['shift_assignments']) > 0
-    # Verify rest period: no operator on consecutive shifts same day
-    # (we assign by shift number, so this is inherently satisfied)
+
+    # Labor cost: PLT-003 (CA, CoL 1.15) vs PLT-005 (SC, CoL 0.88)
+    print("\n── Labor Cost (30-day, default roster, 42h avg week) ──")
+    ca = calculate_labor_cost("PLT-003", period_days=30)
+    sc = calculate_labor_cost("PLT-005", period_days=30)
+    for tag, lc in [("PLT-003 CA", ca), ("PLT-005 SC", sc)]:
+        print(f"  {tag}: ${lc['total']:,.2f}  OT%={lc['overtime_pct']:.1f}  $/hr={lc['labor_cost_per_hour']:.2f}")
+        print(f"    premiums: {lc['premium_costs']}")
+    ratio = ca["total"] / sc["total"]
+    print(f"  CA/SC ratio: {ratio:.3f}  (expected ~{PLANT_COL['PLT-003']/PLANT_COL['PLT-005']:.3f})")
+    assert ratio > 1.0, "CA should cost more than SC"
+    assert abs(ratio - PLANT_COL["PLT-003"] / PLANT_COL["PLT-005"]) < 0.01
+    assert ca["overtime_pct"] == sc["overtime_pct"], "OT% should be identical (same hours)"
+    assert ca["labor_cost_per_hour"] > sc["labor_cost_per_hour"]
+    cpu = cost_per_unit("PLT-003", 500_000)
+    assert cpu > 0
+    print(f"  PLT-003 cost/unit (500k units): ${cpu:.4f}")
     print("PASS")

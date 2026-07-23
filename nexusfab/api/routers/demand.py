@@ -3,10 +3,11 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from nexusfab.api.schemas.demand import DemandPlan
 from nexusfab.optimization.demand import generate_demand_plan
 from nexusfab.seed.plants import get_plant
 
-router = APIRouter(prefix="/api/demand", tags=["demand"])
+router = APIRouter(prefix="/api/demand", tags=["Demand"])
 
 
 class DemandPlanRequest(BaseModel):
@@ -18,7 +19,7 @@ class DemandPlanRequest(BaseModel):
     lead_time_weeks: float = Field(default=2.0, ge=0.5, le=12.0)
 
 
-@router.get("/forecast/{plant_id}")
+@router.get("/forecast/{plant_id}", response_model=DemandPlan, summary="Demand forecast for a specific plant over N weeks")
 async def get_forecast(plant_id: str, weeks: int = 12):
     if not get_plant(plant_id):
         raise HTTPException(404, f"Plant {plant_id} not found")
@@ -26,7 +27,7 @@ async def get_forecast(plant_id: str, weeks: int = 12):
     return plan.to_dict()
 
 
-@router.post("/plan")
+@router.post("/plan", response_model=DemandPlan, summary="Create demand plan with custom MAPE target, service level, and lead time")
 async def create_demand_plan(req: DemandPlanRequest):
     if req.plant_id and not get_plant(req.plant_id):
         raise HTTPException(404, f"Plant {req.plant_id} not found")
