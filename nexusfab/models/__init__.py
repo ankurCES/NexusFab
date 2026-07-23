@@ -1,4 +1,5 @@
 from nexusfab.models.base import Base, UUIDBase
+from nexusfab.models.downtime import DowntimeEvent
 from nexusfab.models.enums import (
     ABCClass,
     DowntimeType,
@@ -8,8 +9,10 @@ from nexusfab.models.enums import (
     PlantCategory,
 )
 from nexusfab.models.maintenance import MaintenanceTask, SparePart
+from nexusfab.models.oee import OEERecord
 from nexusfab.models.plant import Equipment, Plant, ProductionLine
-from nexusfab.models.production import DowntimeEvent, OEERecord, Product, ProductionRun
+from nexusfab.models.product import Product
+from nexusfab.models.production import ProductionRun
 from nexusfab.models.workforce import Operator, Shift, SkillMatrix
 
 __all__ = [
