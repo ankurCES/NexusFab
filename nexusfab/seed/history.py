@@ -175,24 +175,92 @@ def generate_history(days: int = 30, seed: int = 42) -> HistoryData:
                         performance=round(perf, 4),
                         quality=round(qual, 4),
                         oee=round(avail * perf * qual, 4),
+                        six_big_losses=_six_big_losses(rng, avail, perf, qual),
                     ))
 
     return data
 
 
-def print_summary(data: HistoryData):
+async def seed_history(session) -> None:
+    """Seed production_runs, downtime_events, oee_records tables from generated data."""
+    from sqlalchemy import select
+
+    from nexusfab.models.downtime import DowntimeEvent
+    from nexusfab.models.enums import DowntimeType
+    from nexusfab.models.oee import OEERecord
+    from nexusfab.models.production import ProductionRun
+
+    exists = await session.execute(select(ProductionRun).limit(1))
+    if exists.scalar_one_or_none():
+        return
+
+    data = generate_history()
+
+    for r in data.production_runs:
+        session.add(ProductionRun(
+            id=seed_uuid(f"run-{r.line_name}-{r.start_time.isoformat()}"),
+            line_id=seed_uuid(r.line_name),
+            product_id=seed_uuid(r.product_sku),
+            start_time=r.start_time,
+            end_time=r.end_time,
+            planned_qty=r.planned_qty,
+            actual_qty=r.actual_qty,
+            good_qty=r.good_qty,
+        ))
+
+    for d in data.downtime_events:
+        session.add(DowntimeEvent(
+            id=seed_uuid(f"dt-{d.line_name}-{d.start_time.isoformat()}"),
+            line_id=seed_uuid(d.line_name),
+            equipment_id=seed_uuid(d.equipment_name) if d.equipment_name else None,
+            start_time=d.start_time,
+            end_time=d.end_time,
+            downtime_type=DowntimeType(d.downtime_type),
+            root_cause=d.root_cause,
+        ))
+
+    for o in data.oee_records:
+        session.add(OEERecord(
+            id=seed_uuid(f"oee-{o.line_name}-{o.timestamp.date()}-s{o.shift}"),
+            line_id=seed_uuid(o.line_name),
+            shift_date=o.timestamp.date(),
+            shift_number=o.shift,
+            availability=o.availability,
+            performance=o.performance,
+            quality=o.quality,
+            oee=o.oee,
+            six_big_losses=o.six_big_losses,
+        ))
+
+    await session.commit()
+
+
+def _print_summary(data: HistoryData):
     print(f"Production runs: {len(data.production_runs):,}")
     print(f"Downtime events: {len(data.downtime_events):,}")
     print(f"OEE records:     {len(data.oee_records):,}")
 
+    oees = [r.oee for r in data.oee_records]
+    print(f"OEE range: {min(oees):.4f} – {max(oees):.4f}, avg {sum(oees)/len(oees):.4f}")
+
     by_plant: dict[str, list[float]] = {}
     for rec in data.oee_records:
         by_plant.setdefault(rec.plant_id, []).append(rec.oee)
-    for pid, oees in sorted(by_plant.items()):
-        avg = sum(oees) / len(oees)
-        print(f"  {pid}: avg OEE = {avg:.4f} ({len(oees)} shifts)")
+    for pid, plant_oees in sorted(by_plant.items()):
+        avg = sum(plant_oees) / len(plant_oees)
+        print(f"  {pid}: avg OEE = {avg:.4f} ({len(plant_oees)} shifts)")
 
 
 if __name__ == "__main__":
     data = generate_history()
-    print_summary(data)
+    _print_summary(data)
+
+    # self-check
+    assert len(data.production_runs) > 2000
+    assert len(data.downtime_events) > 1000
+    assert len(data.oee_records) > 1000
+    oees = [r.oee for r in data.oee_records]
+    assert 0.50 < sum(oees) / len(oees) < 0.80, f"avg OEE out of range: {sum(oees)/len(oees):.4f}"
+    assert any(o > 0.80 for o in oees), "no OEE records above 80%"
+    assert all(r.six_big_losses for r in data.oee_records), "missing six_big_losses"
+    print("OK — all checks passed")
