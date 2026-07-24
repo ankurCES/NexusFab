@@ -1,200 +1,236 @@
-# NexusFab — Manufacturing Operations Optimizer
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/-NexusFab-0d1117?style=for-the-badge&labelColor=0d1117">
+    <source media="(prefers-color-scheme: light)" srcset="https://img.shields.io/badge/-NexusFab-ffffff?style=for-the-badge&labelColor=ffffff">
+    <img alt="" src="" width="1" height="1">
+  </picture>
+</p>
 
-Real-time digital twin for multi-plant manufacturing operations. Combines **SimPy** discrete-event simulation, **OR-Tools / PuLP** optimization, **scikit-learn** predictive maintenance, and a **React** dashboard — all launchable with a single script.
-
-Built as a Nestlé-scale reference architecture: 5 plants, 22 production lines, 85+ equipment assets, full product catalog with allergen matrices and changeover costs.
-
-## What It Does
-
-| Module | Engine | What you get |
-|--------|--------|-------------|
-| **OEE Monitoring** | SimPy DES with Weibull failures | Plant/line OEE, availability, performance, quality metrics |
-| **Predictive Maintenance** | IsolationForest + Weibull RUL | Equipment health matrix, RUL timeline, alert levels (GREEN→RED) |
-| **Production Sequencing** | OR-Tools CP-SAT | Changeover-minimized schedules with allergen/CIP constraints |
-| **Network Optimization** | PuLP CBC MILP | Multi-plant allocation, transport flow optimization, rerouting |
-| **Demand Planning** | Time-series decomposition | SKU-level forecasts, capacity gap analysis |
-| **Workforce Scheduling** | Constraint solver | Shift coverage, skill-gap analysis, regulatory compliance |
-| **Energy & Sustainability** | Tariff-aware optimizer | Load shifting, CO₂ tracking, savings opportunities |
-| **Food Safety (HACCP)** | Rule engine | CCP monitoring, allergen segregation, CIP scheduling |
-| **Spare Parts** | ABC-XYZ + EOQ | Inventory classification, reorder points, stockout risk |
-| **Sensor Streaming** | SSE + synthetic data | Live sensor gauges, sparklines, anomaly detection |
-| **What-If Scenarios** | Parameterized simulation | Equipment failure, demand spike, energy price scenarios |
-
-## Architecture
+<div align="center">
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  React + Vite + Tailwind CSS (port 5173)                │
-│  11 pages: Dashboard, Maintenance, Network, Compliance, │
-│  Sequencing, Sensors, Workforce, Energy, Scenarios,     │
-│  Analytics, Plant Detail                                │
-└──────────────────────┬──────────────────────────────────┘
-                       │ /api proxy
-┌──────────────────────▼──────────────────────────────────┐
-│  FastAPI + Uvicorn (port 8000)                          │
-│  33 endpoints across 13 routers                         │
-│  Health probes: /health/live, /health/ready, /metrics   │
-├─────────────────────────────────────────────────────────┤
-│  Simulation        │ Optimization      │ ML / PdM       │
-│  SimPy DES engine  │ OR-Tools CP-SAT   │ IsolationForest│
-│  Weibull failures  │ PuLP CBC MILP     │ Weibull RUL    │
-│  CIP scheduling    │ Demand planning   │ Z-score norm   │
-│  Sensor streams    │ Workforce solver  │ Feature eng    │
-├─────────────────────────────────────────────────────────┤
-│  Seed Data (in-memory)                                  │
-│  5 plants · 22 lines · 85+ equipment · 25 products      │
-│  Runs without a database (simulation-only mode)         │
-├─────────────────────────────────────────────────────────┤
-│  PostgreSQL 16 (optional, via Docker)                   │
-│  Alembic migrations · Adminer UI on :8080               │
-└─────────────────────────────────────────────────────────┘
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                                                                     │
+  │    ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗███████╗ █████╗ ██████╗  │
+  │    ████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝██╔════╝██╔══██╗██╔══██╗ │
+  │    ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗█████╗  ███████║██████╔╝ │
+  │    ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║██╔══╝  ██╔══██║██╔══██╗ │
+  │    ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║██║     ██║  ██║██████╔╝ │
+  │    ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝     ╚═╝  ╚═╝╚═════╝  │
+  │                                                                     │
+  │             Manufacturing Operations Optimizer                      │
+  │                                                                     │
+  │    Real-time digital twin · Discrete-event simulation               │
+  │    OR-Tools optimization · Predictive maintenance · React UI        │
+  │                                                                     │
+  └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+**A full-stack digital twin for multi-plant manufacturing operations.**<br>
+**SimPy simulation × OR-Tools optimization × ML predictive maintenance × React dashboard**
+
+</div>
+
+---
+
+<p align="center">
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.12+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+"></a>
+  <a href="https://fastapi.tiangolo.com/"><img src="https://img.shields.io/badge/FastAPI-0.115-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI"></a>
+  <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 19"></a>
+  <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS 4"></a>
+  <a href="https://www.postgresql.org/"><img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL 16"></a>
+  <br>
+  <a href="https://github.com/google/or-tools"><img src="https://img.shields.io/badge/OR--Tools-9.11-4285F4?style=flat-square&logo=google&logoColor=white" alt="OR-Tools"></a>
+  <a href="https://simpy.readthedocs.io/"><img src="https://img.shields.io/badge/SimPy-4.1-green?style=flat-square" alt="SimPy"></a>
+  <a href="https://scikit-learn.org/"><img src="https://img.shields.io/badge/scikit--learn-1.5-F7931E?style=flat-square&logo=scikitlearn&logoColor=white" alt="scikit-learn"></a>
+  <a href="https://github.com/ankurCES/NexusFab"><img src="https://img.shields.io/github/last-commit/ankurCES/NexusFab?style=flat-square&color=blue" alt="Last Commit"></a>
+  <a href="https://github.com/ankurCES/NexusFab"><img src="https://img.shields.io/github/repo-size/ankurCES/NexusFab?style=flat-square&color=purple" alt="Repo Size"></a>
+  <a href="https://github.com/ankurCES/NexusFab"><img src="https://img.shields.io/badge/version-0.1.0-orange?style=flat-square" alt="Version 0.1.0"></a>
+</p>
+
+---
+
+## ✨ Features
+
+| Domain | Capability | Engine |
+|--------|-----------|--------|
+| 🏭 **Production Scheduling** | Changeover-aware line sequencing, allergen constraints, CIP scheduling | OR-Tools CP-SAT |
+| 🔧 **Predictive Maintenance** | Weibull failure modeling, sensor anomaly detection, spare parts optimization | scikit-learn + SimPy |
+| ⚡ **Energy Optimization** | Scenario modeling for energy costs, sustainability tracking | PuLP / OR-Tools |
+| 👷 **Workforce Planning** | Shift optimization, regulatory compliance, skill-based allocation | OR-Tools |
+| 🌐 **Network Optimization** | Multi-plant demand allocation, transport routing, lead-time modeling | OR-Tools |
+| 📊 **Digital Twin** | Discrete-event simulation of production lines with real-time sensor streams | SimPy |
+| 📈 **Analytics Dashboard** | OEE gauges, Gantt charts, plant maps, scenario comparison | React + Recharts |
+| 🛡️ **Compliance** | Regulatory constraint tracking, allergen cross-contact prevention | Domain rules engine |
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# Clone
+git clone https://github.com/ankurCES/NexusFab.git
+cd NexusFab
+
+# One-command launch (Docker)
+docker compose up -d --build
+
+# Or use the launcher script (auto-copies .env, starts DB + API + frontend)
+chmod +x run.sh && ./run.sh
+```
+
+The API is at **http://localhost:8000** · Dashboard at **http://localhost:5173** · Adminer (DB UI) at **http://localhost:8080**
+
+---
+
+## 📦 Installation
 
 ### Prerequisites
+- **Python 3.12+** · **Node.js 20+** · **PostgreSQL 16** (or Docker)
 
-- **Python 3.12+**
-- **Node.js 18+**
-- **Docker** (for PostgreSQL — optional, app runs in simulation-only mode without it)
-- **uv** (recommended) or pip
-
-### One-command launch (with Docker)
-
+### Backend
 ```bash
-git clone https://github.com/ankurCES/NexusFab.git
-cd NexusFab
-./run.sh
-```
-
-`run.sh` handles everything: Docker DB, migrations, seed data, API server, sensor simulator, and frontend dev server. Open **http://localhost:5173** when it's ready.
-
-**Flags:**
-```
---api-only    Skip frontend (API on :8000 only)
---no-seed     Skip database seeding
---prod        Run uvicorn with 4 workers (no hot reload)
---reset       Wipe Docker volumes and start fresh
-```
-
-### Manual setup (no Docker, simulation-only)
-
-```bash
-# 1. Clone
-git clone https://github.com/ankurCES/NexusFab.git
-cd NexusFab
-
-# 2. Python environment
-uv venv && source .venv/bin/activate
+# Install dependencies (using uv — or pip install -e .[dev])
 uv sync
 
-# 3. Environment file
-cp .env.example .env
+# Copy environment config
+cp .env.example .env          # edit DB credentials if needed
 
-# 4. Start API server
-PYTHONPATH=. uvicorn nexusfab.main:app --host 0.0.0.0 --port 8000 --reload
+# Run database migrations
+alembic upgrade head
 
-# 5. Start frontend (new terminal)
+# Seed demo data (5 plants, production lines, 30-day history)
+make seed
+
+# Start API server
+make dev                      # → http://localhost:8000
+```
+
+### Frontend
+```bash
 cd frontend
 npm install
-npm run dev
+npm run dev                   # → http://localhost:5173
 ```
 
-Open **http://localhost:5173**. All data comes from in-memory seed — no database required.
-
-### With pip (instead of uv)
-
+### Docker (all-in-one)
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+docker compose up -d --build  # API + PostgreSQL + Adminer
 ```
 
-## API Endpoints
+---
 
-All endpoints are prefixed with `/api`. Interactive docs at **http://localhost:8000/docs**.
+## 🔌 API Endpoints
 
-| Group | Endpoints |
-|-------|-----------|
-| Health | `GET /health/live` · `/health/ready` · `/health/detailed` · `/health/errors` · `/metrics` |
-| OEE | `GET /oee/plant/{id}` · `/oee/{plant}/{line}` · `/metrics/dashboard` · `/metrics/downtime-pareto/{id}` |
-| Plants | `GET /plants` · `/plants/{id}/lines` |
-| Maintenance | `GET /maintenance/schedule/{id}` · `/maintenance/predictions/{id}` · `/maintenance/history/{id}` |
-| Spares | `GET /spares/status/{id}` · `/spares/alerts` · `/spares/pooling` · `/spares/{id}` |
-| Production | `GET /production/schedule/{id}` · `/production/kpis/{id}` · `POST /production/optimize-sequence` |
-| Compliance | `GET /compliance/{id}/ccps` · `/compliance/{id}/allergens` · `/compliance/{id}/cip-schedule` · `/compliance/{id}/score` |
-| Network | `GET /network/status` · `/network/flows` · `/network/allocation` · `POST /network/balance` · `/network/optimize` |
-| Sensors | `GET /sensors/{plant}/{line}/equipment` · `/sensors/{plant}/{line}/{equip}` · `/sensors/{equip}/history` · SSE `/sensors/stream/{plant}/{line}` |
-| Demand | `GET /network/demand/{id}` |
-| Workforce | `GET /workforce` · `/workforce/{id}` |
-| Energy | `GET /energy` · `/energy/{id}` · `POST /energy/optimize` |
-| Scenarios | `GET /scenarios` · `POST /scenarios/run` · `/scenarios/custom` |
-| Simulation | `POST /simulate` |
+| Route | Description |
+|-------|-------------|
+| `GET /health` | Health check |
+| `GET /plants` | List all plants and lines |
+| `GET /metrics/oee` | OEE calculations |
+| `POST /optimization/schedule` | Production scheduling |
+| `POST /optimization/sequence` | Line sequencing with changeovers |
+| `GET /maintenance/predictions` | Predictive maintenance alerts |
+| `GET /sensors/stream` | Real-time sensor data |
+| `POST /simulation/run` | Run SimPy simulation scenarios |
+| `POST /demand/plan` | Demand planning optimization |
+| `GET /network/allocation` | Multi-plant network optimization |
+| `GET /workforce/schedule` | Workforce shift optimization |
+| `GET /energy/scenarios` | Energy scenario modeling |
+| `GET /compliance/status` | Regulatory compliance dashboard |
+| `GET /spares/inventory` | Spare parts optimization |
 
-## Running Tests
+Full interactive docs at **http://localhost:8000/docs** (Swagger UI).
 
-```bash
-PYTHONPATH=. pytest tests/ -v
-```
+---
 
-20 test modules covering simulation, optimization, predictive maintenance, spare parts, energy, compliance, and network allocation.
-
-## Project Structure
+## 🗂️ Project Structure
 
 ```
 NexusFab/
-├── nexusfab/
-│   ├── api/                  # FastAPI routers + Pydantic schemas
-│   │   ├── routers/          # 13 endpoint modules
-│   │   └── schemas/          # Request/response models
-│   ├── models/               # SQLAlchemy ORM models
-│   ├── optimization/         # OR-Tools, PuLP, scikit-learn solvers
-│   │   ├── scheduling.py     # CP-SAT production sequencing
-│   │   ├── network.py        # MILP network allocation
-│   │   ├── predictive_maintenance.py  # IsolationForest + Weibull
-│   │   ├── spare_parts.py    # ABC-XYZ inventory optimization
-│   │   └── ...
-│   ├── seed/                 # In-memory plant/product/history data
-│   ├── services/             # OEE calculation service
-│   └── simulation/           # SimPy DES engine
-│       ├── line_model.py     # Production line simulator
-│       ├── runner.py         # Plant/line orchestrator
-│       ├── sensor_stream.py  # SSE sensor data generator
-│       └── scenarios.py      # What-if scenario engine
-├── frontend/                 # React + Vite + Tailwind
-│   └── src/pages/            # 11 dashboard pages
-├── tests/                    # 20 test modules
-├── alembic/                  # Database migrations
-├── docker-compose.yml        # PostgreSQL + Adminer
-├── run.sh                    # Single-script launcher
-└── pyproject.toml            # Python project config
+├── nexusfab/                  # Python backend (74 modules)
+│   ├── api/                   # FastAPI application
+│   │   ├── main.py            # App factory + CORS + lifespan
+│   │   ├── routers/           # 12 route modules (production, maintenance, sensors…)
+│   │   └── schemas/           # Pydantic request/response models
+│   ├── models/                # SQLAlchemy ORM (plant, product, downtime, workforce…)
+│   ├── optimization/          # OR-Tools / PuLP solvers
+│   │   ├── scheduling.py      # CP-SAT production scheduler
+│   │   ├── sequencing.py      # Changeover-aware line sequencing
+│   │   ├── predictive_maintenance.py  # Weibull + ML failure prediction
+│   │   ├── network.py         # Multi-plant demand allocation
+│   │   ├── workforce.py       # Shift optimization
+│   │   └── energy.py          # Energy cost scenarios
+│   ├── simulation/            # SimPy discrete-event engine
+│   │   ├── runner.py          # Simulation orchestrator
+│   │   ├── sensor_stream.py   # Synthetic sensor data generator
+│   │   └── workforce_sim.py   # Workforce simulation
+│   ├── services/              # Business logic (OEE calculator)
+│   ├── seed/                  # Demo data generators
+│   ├── config.py              # Pydantic Settings
+│   └── database.py            # Async SQLAlchemy engine
+├── frontend/                  # React 19 + TypeScript + Tailwind 4
+│   └── src/
+│       ├── pages/             # 11 pages (Dashboard, Maintenance, Sensors…)
+│       └── components/        # GanttChart, OEEGauge, PlantMap…
+├── alembic/                   # Database migrations
+├── tests/                     # 21 pytest modules
+├── docker-compose.yml         # API + PostgreSQL 16 + Adminer
+├── Makefile                   # dev, test, docker-up, seed
+└── pyproject.toml             # Project metadata + dependencies
 ```
 
-## Seed Data
+---
 
-The simulation runs on realistic manufacturing data modeled after global FMCG operations:
+## ⚙️ Configuration
 
-| Plant | Location | Category | Lines |
-|-------|----------|----------|-------|
-| PLT-001 | Vevey, Switzerland | Dairy | 5 lines |
-| PLT-002 | Arlington, USA | Pet Food | 4 lines |
-| PLT-003 | York, UK | Confectionery | 5 lines |
-| PLT-004 | Dongguan, China | Beverages | 4 lines |
-| PLT-005 | Araras, Brazil | Dairy | 4 lines |
+All config via environment variables (see [`.env.example`](.env.example)):
 
-Each plant has full equipment trees with Weibull failure parameters, sensor configurations, product catalogs with allergen profiles, and changeover cost matrices.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql+asyncpg://nexusfab:nexusfab@localhost:5432/nexusfab` | Async DB connection |
+| `SYNC_DATABASE_URL` | *(derived)* | Alembic migrations |
+| `API_PORT` | `8000` | API server port |
+| `SENSOR_SEED` | `42` | Reproducible simulation runs |
+| `POSTGRES_USER` | `nexusfab` | Docker Compose DB user |
+| `POSTGRES_PASSWORD` | `nexusfab` | Docker Compose DB password |
 
-## Tech Stack
+---
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, Pydantic |
-| Simulation | SimPy 4.1 (DES), Weibull failure models |
-| Optimization | OR-Tools (CP-SAT), PuLP (CBC MILP) |
-| ML | scikit-learn (IsolationForest), NumPy |
-| Frontend | React 19, Vite, Tailwind CSS 4, Recharts 3 |
-| Database | PostgreSQL 16 (optional), Alembic migrations |
-| Infrastructure | Docker Compose, uv package manager |
+## 🧪 Testing
 
-## License
+```bash
+# Run full suite (21 test modules)
+make test
 
-MIT
+# With coverage
+pytest --cov=nexusfab -v
+```
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feat/my-feature`)
+3. Write tests for new functionality
+4. Ensure `make test` and `ruff check .` pass
+5. Submit a pull request
+
+**Code style:** Ruff with Python 3.12 target, 99-char line length.
+
+---
+
+## 📄 License
+
+This project is currently unlicensed. Contact the maintainer for usage terms.
+
+---
+
+<p align="center">
+  <b>Built with</b><br>
+  <a href="https://fastapi.tiangolo.com/">FastAPI</a> ·
+  <a href="https://simpy.readthedocs.io/">SimPy</a> ·
+  <a href="https://github.com/google/or-tools">OR-Tools</a> ·
+  <a href="https://react.dev/">React</a> ·
+  <a href="https://www.postgresql.org/">PostgreSQL</a>
+</p>
